@@ -90,7 +90,8 @@ fn launch(cx: &mut App) {
                     focus: cx.focus_handle(),
                 }
             });
-            demo.read(cx).focus.focus(window, cx);
+            let focus = demo.read(cx).focus.clone();
+            focus.focus(window, cx);
             demo
         },
     )
