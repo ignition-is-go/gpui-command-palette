@@ -215,12 +215,12 @@ impl<M: Clone + 'static> CommandPalette<M> {
                     self.close(window, cx)
                 }
             }
-            "arrowdown" => {
+            "arrowdown" | "down" => {
                 let n = self.state.results(&self.registry.commands()).len();
                 self.state.select_next(n);
                 cx.notify()
             }
-            "arrowup" => {
+            "arrowup" | "up" => {
                 self.state.select_previous();
                 cx.notify()
             }
@@ -248,7 +248,7 @@ impl<M: Clone + 'static> CommandPalette<M> {
                 }
                 cx.notify();
             }
-            "arrowleft" => {
+            "arrowleft" | "left" => {
                 let at = if self.selected_range.is_empty() {
                     self.previous_boundary(self.cursor_offset())
                 } else {
@@ -257,7 +257,7 @@ impl<M: Clone + 'static> CommandPalette<M> {
                 self.selected_range = at..at;
                 cx.notify();
             }
-            "arrowright" => {
+            "arrowright" | "right" => {
                 let at = if self.selected_range.is_empty() {
                     self.next_boundary(self.cursor_offset())
                 } else {
@@ -438,9 +438,31 @@ impl<M: Clone + 'static> Render for CommandPalette<M> {
             .debug_selector(|| "command-palette-dialog".into())
             .track_focus(&self.focus)
             .key_context(KEY_CONTEXT)
-            .on_key_down(cx.listener(|this, event, window, cx| {
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                let key = event.keystroke.key.to_ascii_lowercase();
+                let handled = matches!(
+                    key.as_str(),
+                    "escape"
+                        | "arrowdown"
+                        | "down"
+                        | "arrowup"
+                        | "up"
+                        | "enter"
+                        | "backspace"
+                        | "delete"
+                        | "arrowleft"
+                        | "left"
+                        | "arrowright"
+                        | "right"
+                        | "home"
+                        | "end"
+                        | "tab"
+                ) || (key == "a"
+                    && (event.keystroke.modifiers.platform || event.keystroke.modifiers.control));
                 this.key_down(event, window, cx);
-                cx.stop_propagation()
+                if handled {
+                    cx.stop_propagation();
+                }
             }))
             .on_action(cx.listener(|this, _: &SelectNextCommand, _, cx| {
                 let n = this.state.results(&this.registry.commands()).len();

@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const out = path.resolve("../../artifacts/web-proof");
+const demoUrl = process.env.WEB_PROOF_URL ?? "http://127.0.0.1:8080";
 
 async function bridge(cdp) {
   const response = await cdp.send("Runtime.evaluate", {
@@ -30,7 +31,7 @@ function assertScreenshotSanity(file) {
   expect(colors.size).toBeGreaterThan(8);
   // Palette center and backdrop must be visibly different at the fixed viewport.
   const rgba = (x, y) => [...png.data.slice((y * png.width + x) * 4, (y * png.width + x) * 4 + 4)];
-  expect(rgba(450, 135)).not.toEqual(rgba(20, 20));
+  expect(rgba(450, 200)).not.toEqual(rgba(20, 20));
 }
 
 test("document-owned GPUI canvas survives full real-keyboard palette flow", async () => {
@@ -38,19 +39,27 @@ test("document-owned GPUI canvas survives full real-keyboard palette flow", asyn
   const browser = await chromium.launch({
     channel: "chrome",
     headless: false,
-    args: ["--use-gl=swiftshader", "--use-angle=swiftshader", "--disable-gpu-sandbox"],
+    args: [
+      "--enable-unsafe-webgpu",
+      "--enable-unsafe-swiftshader",
+      "--use-angle=swiftshader",
+      "--use-vulkan=swiftshader",
+      "--enable-features=Vulkan,UseSkiaRenderer",
+      "--disable-gpu-sandbox",
+    ],
   });
   const context = await browser.newContext({ viewport: { width: 900, height: 600 }, deviceScaleFactor: 1 });
   const page = await context.newPage();
   const cdp = await context.newCDPSession(page);
-  await page.goto("http://127.0.0.1:8080", { waitUntil: "networkidle" });
+  await page.goto(demoUrl, { waitUntil: "networkidle" });
   await expect.poll(() => page.locator("canvas").count()).toBe(1);
   const canvas = page.locator("canvas");
   await expect(canvas).toHaveCSS("width", "900px");
   await expect(canvas).toHaveCSS("height", "600px");
   await canvas.evaluate((element) => { element.dataset.productionProof = "persistent"; });
+  // A GPUI canvas pointer-down focuses its hidden text-input seat. Moving DOM
+  // focus back to the canvas would bypass gpui_web's keyboard listeners.
   await canvas.click({ position: { x: 450, y: 300 } });
-  await canvas.focus();
 
   await page.keyboard.press("Control+k");
   await expectBridge(cdp, {
