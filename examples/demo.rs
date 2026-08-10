@@ -10,7 +10,9 @@ fn record_execution(id: &str) {
     LAST_EXECUTION.with(|value| *value.borrow_mut() = Some(id.to_owned()));
 }
 #[cfg(not(target_family = "wasm"))]
-fn record_execution(_: &str) {}
+fn record_execution(id: &str) {
+    eprintln!("command palette demo executed: {id}");
+}
 
 #[cfg(target_family = "wasm")]
 fn json_string(value: &str) -> String {
