@@ -7,7 +7,8 @@ use gpui::{
     actions, div, fill, point, prelude::*, px, relative, size, App, Bounds, Context, Element,
     ElementId, ElementInputHandler, Entity, EntityInputHandler, FocusHandle, GlobalElementId,
     InspectorElementId, InteractiveElement, KeyDownEvent, LayoutId, PaintQuad, Pixels, Render,
-    ShapedLine, SharedString, Style, TextAlign, TextRun, UTF16Selection, UnderlineStyle, Window,
+    ScrollHandle, ShapedLine, SharedString, Style, TextAlign, TextRun, UTF16Selection,
+    UnderlineStyle, Window,
 };
 use std::ops::Range;
 actions!(
@@ -40,6 +41,7 @@ pub struct CommandPalette<M: 'static = ()> {
     marked_range: Option<Range<usize>>,
     last_layout: Option<ShapedLine>,
     last_input_bounds: Option<Bounds<Pixels>>,
+    results_scroll: ScrollHandle,
     _keystroke_subscription: gpui::Subscription,
 }
 impl<M: Clone + 'static> CommandPalette<M> {
@@ -76,6 +78,7 @@ impl<M: Clone + 'static> CommandPalette<M> {
             marked_range: None,
             last_layout: None,
             last_input_bounds: None,
+            results_scroll: ScrollHandle::new(),
             _keystroke_subscription: subscription,
         }
     }
@@ -301,12 +304,16 @@ impl<M: Clone + 'static> Render for CommandPalette<M> {
         let results = self.state.results(&commands);
         self.state.clamp_selection(results.len());
         let selected = self.state.selected_index();
+        if !results.is_empty() {
+            self.results_scroll.scroll_to_item(selected);
+        }
         let mut list = div()
             .id("command-palette-results")
             .role(gpui::Role::ListBox)
             .aria_label("Commands")
             .flex_1()
-            .overflow_y_scroll();
+            .overflow_y_scroll()
+            .track_scroll(&self.results_scroll);
         if results.is_empty() {
             list = list.child(
                 div()
@@ -879,7 +886,9 @@ impl<M: Clone + 'static> Element for PaletteInputElement<M> {
 
 #[cfg(test)]
 mod input_tests {
-    use super::utf16_to_utf8_offset;
+    use super::*;
+    use crate::Command;
+    use gpui::TestAppContext;
 
     #[test]
     fn utf16_offsets_handle_surrogate_pairs_and_relative_composition_ranges() {
@@ -890,5 +899,48 @@ mod input_tests {
         assert_eq!(utf16_to_utf8_offset(text, 3), 5);
         assert_eq!(utf16_to_utf8_offset(text, 4), text.len());
         assert_eq!(utf16_to_utf8_offset("😀x", 2), 4);
+    }
+
+    #[gpui::test]
+    fn selected_result_is_scrolled_into_view(cx: &mut TestAppContext) {
+        let (palette, cx) = cx.add_window_view(|_, cx| CommandPalette::new(cx));
+        let registrations = palette.read_with(cx, |palette, _| {
+            (0..20)
+                .map(|index| {
+                    palette.registry.register(Command::new(
+                        format!("command-{index}"),
+                        format!("Command {index}"),
+                        || {},
+                    ))
+                })
+                .collect::<Vec<_>>()
+        });
+
+        cx.update(|window, cx| {
+            palette.update(cx, |palette, cx| palette.open(window, cx));
+        });
+        cx.refresh().unwrap();
+
+        palette.update(cx, |palette, cx| {
+            palette.state.select(19, 20);
+            cx.notify();
+        });
+        cx.refresh().unwrap();
+
+        palette.read_with(cx, |palette, _| {
+            assert!(palette.results_scroll.offset().y < px(0.));
+            assert_eq!(palette.results_scroll.bottom_item(), 19);
+        });
+
+        palette.update(cx, |palette, cx| {
+            palette.state.select(0, 20);
+            cx.notify();
+        });
+        cx.refresh().unwrap();
+        palette.read_with(cx, |palette, _| {
+            assert_eq!(palette.results_scroll.top_item(), 0);
+        });
+
+        drop(registrations);
     }
 }
