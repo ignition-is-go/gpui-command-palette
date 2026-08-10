@@ -82,6 +82,9 @@ impl<M: Clone + 'static> PaletteState<M> {
             &self.query,
         )
     }
+    pub fn clamp_selection(&mut self, count: usize) {
+        self.selected = self.selected.min(count.saturating_sub(1));
+    }
     pub fn select_next(&mut self, count: usize) {
         if count > 0 {
             self.selected = (self.selected + 1).min(count - 1)

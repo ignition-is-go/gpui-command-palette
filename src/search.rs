@@ -1,117 +1,110 @@
 use crate::Command;
 use std::collections::HashSet;
+
+/// A result in registration order. `score` is retained for API compatibility;
+/// the reference palette does not rank matches.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SearchResult<M: 'static = ()> {
     pub entry: Command<M>,
     pub score: u32,
     pub catalog_index: usize,
 }
-/// Deterministic token/fuzzy search. Every whitespace token must match; ties preserve registration order.
+
+/// Reference-compatible case-insensitive substring filtering.
+///
+/// The trimmed query is matched against name, description, and group. IDs are
+/// deliberately not searchable. Searchable direct children are promoted after
+/// their parent in child registration order and de-duplicated by id, first win.
 pub fn search_commands<M: Clone + 'static>(
     commands: &[Command<M>],
     query: &str,
 ) -> Vec<SearchResult<M>> {
-    let tokens = query
-        .split_whitespace()
-        .map(|v| v.to_lowercase())
-        .collect::<Vec<_>>();
+    let query = query.trim().to_lowercase();
     let mut candidates = Vec::new();
     for command in commands {
-        candidates.push(command.clone());
-        if !tokens.is_empty() && command.searches_children() {
+        if query.is_empty() || matches_query(command, &query) {
+            candidates.push(command.clone());
+        }
+        if !query.is_empty() && command.searches_children() {
             if let Some(children) = command.resolve_children() {
                 for mut child in children {
-                    if child.description.is_none() {
-                        child.description = Some(command.name.clone())
+                    if matches_query(&child, &query) {
+                        if child.description.is_none() {
+                            child.description = Some(command.name.clone());
+                        }
+                        candidates.push(child);
                     }
-                    candidates.push(child)
                 }
             }
         }
     }
     let mut seen = HashSet::new();
-    let mut results = candidates
+    candidates
         .into_iter()
         .enumerate()
         .filter(|(_, c)| seen.insert(c.id.clone()))
-        .filter_map(|(catalog_index, command)| {
-            score(&command, &tokens).map(|score| SearchResult {
-                entry: command,
-                score,
-                catalog_index,
-            })
+        .map(|(catalog_index, entry)| SearchResult {
+            entry,
+            score: 0,
+            catalog_index,
         })
-        .collect::<Vec<_>>();
-    results.sort_by(|a, b| {
-        b.score
-            .cmp(&a.score)
-            .then(a.catalog_index.cmp(&b.catalog_index))
-    });
-    results
+        .collect()
 }
-fn score<M>(c: &Command<M>, tokens: &[String]) -> Option<u32> {
-    if tokens.is_empty() {
-        return Some(0);
-    }
-    let fields = [
-        (c.name.as_str(), 400),
-        (c.id.as_str(), 250),
-        (c.description.as_deref().unwrap_or(""), 100),
-        (c.group.as_deref().unwrap_or(""), 75),
-    ];
-    tokens.iter().try_fold(0, |total, t| {
-        fields
-            .iter()
-            .filter_map(|(f, w)| match_score(&f.to_lowercase(), t).map(|v| v + w))
-            .max()
-            .map(|v| v + total)
-    })
+
+fn matches_query<M>(command: &Command<M>, query: &str) -> bool {
+    command.name.to_lowercase().contains(query)
+        || command
+            .description
+            .as_ref()
+            .is_some_and(|v| v.to_lowercase().contains(query))
+        || command
+            .group
+            .as_ref()
+            .is_some_and(|v| v.to_lowercase().contains(query))
 }
-fn match_score(field: &str, token: &str) -> Option<u32> {
-    if field == token {
-        return Some(1000);
-    }
-    if field.starts_with(token) {
-        return Some(700);
-    }
-    if field
-        .split(|c: char| !c.is_alphanumeric())
-        .any(|w| w.starts_with(token))
-    {
-        return Some(500);
-    }
-    if let Some(i) = field.find(token) {
-        return Some(250_u32.saturating_sub(i.min(200) as u32));
-    }
-    fuzzy_score(field, token)
-}
-fn fuzzy_score(field: &str, token: &str) -> Option<u32> {
-    let mut at = 0usize;
-    let mut gaps = 0u32;
-    for ch in token.chars() {
-        let relative = field[at..].find(ch)?;
-        gaps += relative as u32;
-        at += relative + ch.len_utf8()
-    }
-    Some(100_u32.saturating_sub(gaps.min(99)))
-}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
-    fn token_fuzzy_and_stability() {
+    fn substring_only_and_registration_order() {
         let xs = vec![
-            Command::new("open-file", "Open File", || {}).group("File"),
-            Command::new("close", "Close", || {}),
+            Command::new("z-id-match", "Second Alpha", || {}).group("File"),
+            Command::new("a", "Alpha", || {}),
+            Command::new("of", "Open File", || {}),
         ];
-        assert_eq!(search_commands(&xs, "OF")[0].entry.id, "open-file");
-        assert!(search_commands(&xs, "open missing").is_empty());
+        assert_eq!(
+            search_commands(&xs, "ALPHA")
+                .iter()
+                .map(|x| x.entry.id.as_str())
+                .collect::<Vec<_>>(),
+            ["z-id-match", "a"]
+        );
+        assert!(search_commands(&xs, "z-id").is_empty());
+        assert!(search_commands(&xs, "OF").is_empty());
         assert_eq!(
             search_commands(&xs, "")
                 .iter()
-                .map(|x| x.catalog_index)
+                .map(|x| x.entry.id.as_str())
                 .collect::<Vec<_>>(),
-            [0, 1]
+            ["z-id-match", "a", "of"]
         );
+    }
+    #[test]
+    fn promotions_context_and_first_id_wins() {
+        let direct = Command::new("same", "Direct Sunset", || {});
+        let branch = Command::submenu("scenes", "Open Scene", || {
+            vec![
+                Command::new("same", "Sunset", || {}),
+                Command::new("dawn", "Sunset Dawn", || {}).description("kept"),
+            ]
+        })
+        .searchable_children();
+        let out = search_commands(&[direct, branch], "sunset");
+        assert_eq!(
+            out.iter().map(|x| x.entry.id.as_str()).collect::<Vec<_>>(),
+            ["same", "dawn"]
+        );
+        assert_eq!(out[1].entry.description.as_deref(), Some("kept"));
     }
 }

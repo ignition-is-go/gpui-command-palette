@@ -1,10 +1,11 @@
 use crate::{Modifier, Shortcut};
 use gpui::{App, Window};
-use std::{fmt, rc::Rc};
+use std::{fmt, sync::Arc};
 
 pub type CommandId = String;
-type Handler = Rc<dyn Fn(&mut Window, &mut App)>;
-type Children<M> = Rc<dyn Fn() -> Vec<Command<M>>>;
+type Action = Arc<dyn Fn() + Send + Sync>;
+type Handler = Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>;
+type Children<M> = Arc<dyn Fn() -> Vec<Command<M>> + Send + Sync>;
 
 #[derive(Clone)]
 pub struct Command<M = ()> {
@@ -14,7 +15,8 @@ pub struct Command<M = ()> {
     pub group: Option<String>,
     pub shortcut: Option<Shortcut>,
     pub metadata: M,
-    handler: Handler,
+    action: Action,
+    handler: Option<Handler>,
     children: Option<Children<M>>,
     search_children: bool,
 }
@@ -22,24 +24,27 @@ impl Command<()> {
     pub fn new(
         id: impl Into<String>,
         name: impl Into<String>,
-        action: impl Fn() + 'static,
+        action: impl Fn() + Send + Sync + 'static,
     ) -> Self {
-        Self::with_metadata(id, name, (), move |_, _| action())
+        Self::with_metadata(id, name, (), action)
     }
     pub fn submenu(
         id: impl Into<String>,
         name: impl Into<String>,
-        children: impl Fn() -> Vec<Self> + 'static,
+        children: impl Fn() -> Vec<Self> + Send + Sync + 'static,
     ) -> Self {
         Self::new(id, name, || {}).children(children)
     }
 }
 impl<M: 'static> Command<M> {
+    /// Construct portable command data. The action and child producer retain the
+    /// reference crate's `Send + Sync` guarantee; GPUI-aware execution is an
+    /// optional, separately installed hook.
     pub fn with_metadata(
         id: impl Into<String>,
         name: impl Into<String>,
         metadata: M,
-        handler: impl Fn(&mut Window, &mut App) + 'static,
+        action: impl Fn() + Send + Sync + 'static,
     ) -> Self {
         Self {
             id: id.into(),
@@ -48,7 +53,8 @@ impl<M: 'static> Command<M> {
             group: None,
             shortcut: None,
             metadata,
-            handler: Rc::new(handler),
+            action: Arc::new(action),
+            handler: None,
             children: None,
             search_children: false,
         }
@@ -65,8 +71,8 @@ impl<M: 'static> Command<M> {
         self.shortcut = Some(Shortcut::new(modifiers, key));
         self
     }
-    pub fn children(mut self, children: impl Fn() -> Vec<Self> + 'static) -> Self {
-        self.children = Some(Rc::new(children));
+    pub fn children(mut self, children: impl Fn() -> Vec<Self> + Send + Sync + 'static) -> Self {
+        self.children = Some(Arc::new(children));
         self
     }
     pub fn searchable_children(mut self) -> Self {
@@ -82,17 +88,27 @@ impl<M: 'static> Command<M> {
     pub fn resolve_children(&self) -> Option<Vec<Self>> {
         self.children.as_ref().map(|f| f())
     }
+    pub fn execute(&self) {
+        (self.action)()
+    }
     pub fn execute_in(&self, window: &mut Window, cx: &mut App) {
-        (self.handler)(window, cx)
+        (self.action)();
+        if let Some(handler) = &self.handler {
+            handler(window, cx);
+        }
     }
 }
 impl<M: Default + 'static> Command<M> {
+    /// Add a GPUI callback. Prefer portable `with_metadata` plus
+    /// `CommandPalette::with_on_execute` when the callback captures GPUI entities.
     pub fn with_handler(
         id: impl Into<String>,
         name: impl Into<String>,
-        handler: impl Fn(&mut Window, &mut App) + 'static,
+        handler: impl Fn(&mut Window, &mut App) + Send + Sync + 'static,
     ) -> Self {
-        Self::with_metadata(id, name, M::default(), handler)
+        let mut command = Self::with_metadata(id, name, M::default(), || {});
+        command.handler = Some(Arc::new(handler));
+        command
     }
 }
 impl<M> PartialEq for Command<M> {
@@ -111,5 +127,28 @@ impl<M: fmt::Debug + 'static> fmt::Debug for Command<M> {
             .field("metadata", &self.metadata)
             .field("is_branch", &self.is_branch())
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn assert_send_sync<T: Send + Sync>() {}
+    #[test]
+    fn portable_commands_are_send_sync() {
+        assert_send_sync::<Command>();
+    }
+    #[test]
+    fn live_children_and_execute() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static N: AtomicUsize = AtomicUsize::new(0);
+        let c = Command::submenu("x", "X", || {
+            let n = N.fetch_add(1, Ordering::SeqCst) + 1;
+            (0..n)
+                .map(|i| Command::new(i.to_string(), "item", || {}))
+                .collect()
+        });
+        assert_eq!(c.resolve_children().unwrap().len(), 1);
+        assert_eq!(c.resolve_children().unwrap().len(), 2);
     }
 }

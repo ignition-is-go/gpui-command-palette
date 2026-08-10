@@ -28,20 +28,15 @@ impl<M: Clone> CommandRegistry<M> {
     }
     pub fn register(&self, command: Command<M>) -> Registration<M> {
         let mut inner = self.0.borrow_mut();
-        let id = if let Some(index) = inner
+        // Match the reference context: replacement is remove-then-push, so it
+        // moves to the end of registration order. A fresh token ensures an old
+        // RAII handle cannot unregister the replacement when it later drops.
+        inner
             .entries
-            .iter()
-            .position(|(_, existing)| existing.id == command.id)
-        {
-            let id = inner.entries[index].0;
-            inner.entries[index].1 = command;
-            id
-        } else {
-            inner.next += 1;
-            let id = RegistrationId(inner.next);
-            inner.entries.push((id, command));
-            id
-        };
+            .retain(|(_, existing)| existing.id != command.id);
+        inner.next += 1;
+        let id = RegistrationId(inner.next);
+        inner.entries.push((id, command));
         inner.revision += 1;
         Registration {
             id,
@@ -84,6 +79,18 @@ impl<M: Clone> CommandRegistry<M> {
             x.revision += 1
         };
         c
+    }
+    pub fn unregister_many(&self, command_ids: &[&str]) -> usize {
+        let mut inner = self.0.borrow_mut();
+        let old_len = inner.entries.len();
+        inner
+            .entries
+            .retain(|entry| !command_ids.contains(&entry.1.id.as_str()));
+        let removed = old_len - inner.entries.len();
+        if removed > 0 {
+            inner.revision += 1;
+        }
+        removed
     }
     pub fn commands(&self) -> Vec<Command<M>> {
         self.0
@@ -152,7 +159,7 @@ mod tests {
         assert_eq!(r.commands()[0].id, "b");
     }
     #[test]
-    fn duplicate_id_updates_without_reordering() {
+    fn duplicate_id_replaces_at_end_with_independent_lifetime() {
         let r = CommandRegistry::new();
         let _a = r.register(Command::new("a", "A", || {}));
         let b = r.register(Command::new("b", "B", || {}));
@@ -162,7 +169,15 @@ mod tests {
                 .iter()
                 .map(|c| c.id.as_str())
                 .collect::<Vec<_>>(),
-            ["a", "b"]
+            ["b", "a"]
+        );
+        drop(_a);
+        assert_eq!(
+            r.commands()
+                .iter()
+                .map(|c| c.id.as_str())
+                .collect::<Vec<_>>(),
+            ["b", "a"]
         );
         update.forget();
         b.forget();

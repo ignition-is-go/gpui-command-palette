@@ -2,13 +2,14 @@
 use gpui::{Keystroke, Modifiers};
 use std::fmt;
 
-fn is_mac() -> bool {
-    if cfg!(target_os = "macos") {
-        return true;
-    }
-    #[cfg(target_family = "wasm")]
+pub(crate) fn is_mac() -> bool {
+    #[cfg(target_os = "macos")]
     {
-        return web_sys::window()
+        true
+    }
+    #[cfg(all(not(target_os = "macos"), target_family = "wasm"))]
+    {
+        web_sys::window()
             .map(|window| {
                 window
                     .navigator()
@@ -16,10 +17,12 @@ fn is_mac() -> bool {
                     .unwrap_or_default()
                     .contains("Mac")
             })
-            .unwrap_or(false);
+            .unwrap_or(false)
     }
-    #[cfg(not(target_family = "wasm"))]
-    false
+    #[cfg(all(not(target_os = "macos"), not(target_family = "wasm")))]
+    {
+        false
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -63,15 +66,9 @@ pub struct Shortcut {
 }
 impl Shortcut {
     pub fn new(modifiers: Vec<Modifier>, key: impl Into<String>) -> Self {
-        let mut normalized = Vec::with_capacity(3);
-        for modifier in [Modifier::Main, Modifier::Alt, Modifier::Shift] {
-            if modifiers.contains(&modifier) {
-                normalized.push(modifier);
-            }
-        }
         Self {
-            modifiers: normalized,
-            key: normalize_key(&key.into()),
+            modifiers,
+            key: key.into(),
         }
     }
     pub fn matches(&self, stroke: &Keystroke) -> bool {
@@ -87,7 +84,7 @@ impl Shortcut {
             && platform == (has(Modifier::Main) && is_mac())
             && alt == has(Modifier::Alt)
             && shift == has(Modifier::Shift)
-            && normalize_key(&stroke.key).eq_ignore_ascii_case(&self.key)
+            && normalize_key(&stroke.key).eq_ignore_ascii_case(&normalize_key(&self.key))
     }
     pub fn gpui_binding(&self) -> String {
         let mut parts = self
@@ -105,7 +102,8 @@ impl Shortcut {
                 Modifier::Shift => "shift",
             })
             .collect::<Vec<_>>();
-        parts.push(&self.key);
+        let key = normalize_key(&self.key);
+        parts.push(&key);
         parts.join("-")
     }
 }
@@ -120,7 +118,7 @@ impl fmt::Display for Shortcut {
         if !self.modifiers.is_empty() {
             f.write_str("+")?;
         }
-        f.write_str(&display_key(&self.key))
+        f.write_str(&display_key(&normalize_key(&self.key)))
     }
 }
 pub fn normalize_key(key: &str) -> String {
@@ -154,19 +152,18 @@ fn display_key(key: &str) -> String {
 mod tests {
     use super::*;
     #[test]
-    fn normalizes_order_and_keys() {
+    fn preserves_public_data_and_normalizes_platform_matching() {
+        let shortcut = Shortcut::new(vec![Modifier::Shift, Modifier::Main], "KeyK");
+        assert_eq!(shortcut.key, "KeyK");
         assert_eq!(
-            Shortcut::new(
-                vec![Modifier::Shift, Modifier::Main, Modifier::Main],
-                "KeyK"
-            )
-            .to_string(),
+            shortcut.to_string(),
             if is_mac() {
-                "Cmd+Shift+K"
+                "Shift+Cmd+K"
             } else {
-                "Ctrl+Shift+K"
+                "Shift+Ctrl+K"
             }
         );
         assert_eq!(normalize_key("Esc"), "escape");
+        assert!(shortcut.gpui_binding().ends_with("-k"));
     }
 }
