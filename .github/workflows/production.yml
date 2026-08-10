@@ -51,7 +51,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install compositor and GPUI libraries
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libfontconfig1-dev libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev weston
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libfontconfig1-dev libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev weston xvfb
       - name: Prove both enabled Linux backends compile
         run: cargo check --locked --all-targets --all-features
       - name: Build native shared demo

@@ -50,6 +50,7 @@ test("document-owned GPUI canvas survives full real-keyboard palette flow", asyn
   await expect(canvas).toHaveCSS("height", "600px");
   await canvas.evaluate((element) => { element.dataset.productionProof = "persistent"; });
   await canvas.click({ position: { x: 450, y: 300 } });
+  await canvas.focus();
 
   await page.keyboard.press("Control+k");
   await expectBridge(cdp, {
