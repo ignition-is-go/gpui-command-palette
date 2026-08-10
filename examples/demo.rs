@@ -1,4 +1,4 @@
-use gpui::{div, prelude::*, px, App, Bounds, WindowBounds, WindowOptions};
+use gpui::{div, prelude::*, px, App, Bounds, FocusHandle, WindowBounds, WindowOptions};
 use gpui_command_palette::{Command, CommandPalette, Modifier};
 
 #[cfg(target_family = "wasm")]
@@ -83,10 +83,15 @@ fn launch(cx: &mut App) {
             for registration in registrations {
                 registration.forget()
             }
-            cx.new(|cx| {
+            let demo = cx.new(|cx| {
                 cx.observe(&palette, |_, _, cx| cx.notify()).detach();
-                Demo { palette }
-            })
+                Demo {
+                    palette,
+                    focus: cx.focus_handle(),
+                }
+            });
+            demo.read(cx).focus.focus(window, cx);
+            demo
         },
     )
     .unwrap();
@@ -96,12 +101,14 @@ fn launch(cx: &mut App) {
 }
 struct Demo {
     palette: gpui::Entity<CommandPalette>,
+    focus: FocusHandle,
 }
 impl gpui::Render for Demo {
     fn render(&mut self, _: &mut gpui::Window, _cx: &mut gpui::Context<Self>) -> impl IntoElement {
         #[cfg(target_family = "wasm")]
         publish_test_bridge(self.palette.read(_cx));
         div()
+            .track_focus(&self.focus)
             .size_full()
             .bg(gpui::rgb(0x111111))
             .text_color(gpui::white())
