@@ -139,7 +139,7 @@ mod tests {
         s.select_next(2);
         assert_eq!(s.selected_index(), 1);
         s.set_query("alpha");
-        assert_eq!(s.results(&root)[0].command.id, "a");
+        assert_eq!(s.results(&root)[0].entry.id, "a");
         s.back_or_close();
         assert!(!s.is_open())
     }

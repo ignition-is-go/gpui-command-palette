@@ -86,7 +86,7 @@ impl<M: Clone + 'static> CommandPalette<M> {
         let results = self.state.results(&commands);
         if let Some(command) = results
             .get(self.state.selected_index())
-            .map(|r| r.command.clone())
+            .map(|r| r.entry.clone())
         {
             if !self.state.enter(&command) {
                 command.execute_in(window, cx);
@@ -173,7 +173,7 @@ impl<M: Clone + 'static> Render for CommandPalette<M> {
             );
         }
         for (index, result) in results.into_iter().enumerate() {
-            let command = result.command;
+            let command = result.entry;
             let description = command.description.clone();
             let shortcut = command.shortcut.as_ref().map(ToString::to_string);
             let branch = command.is_branch();
@@ -201,7 +201,7 @@ impl<M: Clone + 'static> Render for CommandPalette<M> {
                         .state
                         .results(&commands)
                         .get(index)
-                        .map(|r| r.command.clone())
+                        .map(|r| r.entry.clone())
                     {
                         if !this.state.enter(&command) {
                             command.execute_in(window, cx);

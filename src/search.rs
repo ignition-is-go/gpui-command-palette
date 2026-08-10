@@ -2,7 +2,7 @@ use crate::Command;
 use std::collections::HashSet;
 #[derive(Clone, Debug, PartialEq)]
 pub struct SearchResult<M: 'static = ()> {
-    pub command: Command<M>,
+    pub entry: Command<M>,
     pub score: u32,
     pub catalog_index: usize,
 }
@@ -36,7 +36,7 @@ pub fn search_commands<M: Clone + 'static>(
         .filter(|(_, c)| seen.insert(c.id.clone()))
         .filter_map(|(catalog_index, command)| {
             score(&command, &tokens).map(|score| SearchResult {
-                command,
+                entry: command,
                 score,
                 catalog_index,
             })
@@ -104,7 +104,7 @@ mod tests {
             Command::new("open-file", "Open File", || {}).group("File"),
             Command::new("close", "Close", || {}),
         ];
-        assert_eq!(search_commands(&xs, "OF")[0].command.id, "open-file");
+        assert_eq!(search_commands(&xs, "OF")[0].entry.id, "open-file");
         assert!(search_commands(&xs, "open missing").is_empty());
         assert_eq!(
             search_commands(&xs, "")
