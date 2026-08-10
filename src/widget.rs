@@ -22,6 +22,8 @@ pub fn init(cx: &mut App) {
     ]);
 }
 
+type ExecuteHandler<M> = std::rc::Rc<dyn Fn(&M, &mut Window, &mut App)>;
+
 pub struct CommandPalette<M: 'static = ()> {
     registry: CommandRegistry<M>,
     state: PaletteState<M>,
@@ -29,6 +31,7 @@ pub struct CommandPalette<M: 'static = ()> {
     position: CommandPalettePosition,
     focus: FocusHandle,
     restore_focus: Option<FocusHandle>,
+    on_execute: Option<ExecuteHandler<M>>,
 }
 impl<M: Clone + 'static> CommandPalette<M> {
     pub fn new(cx: &mut Context<Self>) -> Self {
@@ -39,6 +42,7 @@ impl<M: Clone + 'static> CommandPalette<M> {
             position: Default::default(),
             focus: cx.focus_handle(),
             restore_focus: None,
+            on_execute: None,
         }
     }
     pub fn with_registry(mut self, registry: CommandRegistry<M>) -> Self {
@@ -50,6 +54,13 @@ impl<M: Clone + 'static> CommandPalette<M> {
     }
     pub fn state(&self) -> &PaletteState<M> {
         &self.state
+    }
+    pub fn with_on_execute(
+        mut self,
+        handler: impl Fn(&M, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_execute = Some(std::rc::Rc::new(handler));
+        self
     }
     pub fn with_theme(mut self, theme: CommandPaletteTheme) -> Self {
         self.theme = theme;
@@ -90,6 +101,9 @@ impl<M: Clone + 'static> CommandPalette<M> {
         {
             if !self.state.enter(&command) {
                 command.execute_in(window, cx);
+                if let Some(handler) = &self.on_execute {
+                    handler(&command.metadata, window, cx);
+                }
                 self.close(window, cx)
             } else {
                 cx.notify()
@@ -205,6 +219,9 @@ impl<M: Clone + 'static> Render for CommandPalette<M> {
                     {
                         if !this.state.enter(&command) {
                             command.execute_in(window, cx);
+                            if let Some(handler) = &this.on_execute {
+                                handler(&command.metadata, window, cx);
+                            }
                             this.close(window, cx)
                         } else {
                             cx.notify()
