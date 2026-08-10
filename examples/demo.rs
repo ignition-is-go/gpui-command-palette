@@ -59,43 +59,46 @@ fn publish_test_bridge(palette: &CommandPalette) {
 fn launch(cx: &mut App) {
     gpui_command_palette::init(cx);
     let bounds = Bounds::centered(None, gpui::size(px(900.), px(600.)), cx);
-    let demo_window = cx.open_window(
-        WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(bounds)),
-            ..Default::default()
-        },
-        |window, cx| {
-            let palette = cx.new(CommandPalette::new);
-            gpui_command_palette::install_palette(&palette, window, cx);
-            let registrations = palette.read(cx).registry().register_many([
-                Command::new("file.open", "Open File", || record_execution("file.open"))
-                    .description("Open a file from disk")
-                    .group("File")
-                    .shortcut(vec![Modifier::Main], "o"),
-                Command::submenu("theme", "Change Theme", || {
-                    vec![
-                        Command::new("theme.dark", "Dark", || record_execution("theme.dark")),
-                        Command::new("theme.light", "Light", || record_execution("theme.light")),
-                    ]
-                })
-                .searchable_children(),
-            ]);
-            for registration in registrations {
-                registration.forget()
-            }
-            let demo = cx.new(|cx| {
-                cx.observe(&palette, |_, _, cx| cx.notify()).detach();
-                Demo {
-                    palette,
-                    focus: cx.focus_handle(),
+    let demo_window = cx
+        .open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(bounds)),
+                ..Default::default()
+            },
+            |window, cx| {
+                let palette = cx.new(CommandPalette::new);
+                gpui_command_palette::install_palette(&palette, window, cx);
+                let registrations = palette.read(cx).registry().register_many([
+                    Command::new("file.open", "Open File", || record_execution("file.open"))
+                        .description("Open a file from disk")
+                        .group("File")
+                        .shortcut(vec![Modifier::Main], "o"),
+                    Command::submenu("theme", "Change Theme", || {
+                        vec![
+                            Command::new("theme.dark", "Dark", || record_execution("theme.dark")),
+                            Command::new("theme.light", "Light", || {
+                                record_execution("theme.light")
+                            }),
+                        ]
+                    })
+                    .searchable_children(),
+                ]);
+                for registration in registrations {
+                    registration.forget()
                 }
-            });
-            let focus = demo.read(cx).focus.clone();
-            focus.focus(window, cx);
-            demo
-        },
-    )
-    .unwrap();
+                let demo = cx.new(|cx| {
+                    cx.observe(&palette, |_, _, cx| cx.notify()).detach();
+                    Demo {
+                        palette,
+                        focus: cx.focus_handle(),
+                    }
+                });
+                let focus = demo.read(cx).focus.clone();
+                focus.focus(window, cx);
+                demo
+            },
+        )
+        .unwrap();
     demo_window
         .update(cx, |_, window, _| window.activate_window())
         .unwrap();
