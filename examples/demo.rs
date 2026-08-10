@@ -59,7 +59,7 @@ fn publish_test_bridge(palette: &CommandPalette) {
 fn launch(cx: &mut App) {
     gpui_command_palette::init(cx);
     let bounds = Bounds::centered(None, gpui::size(px(900.), px(600.)), cx);
-    cx.open_window(
+    let demo_window = cx.open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             ..Default::default()
@@ -96,6 +96,9 @@ fn launch(cx: &mut App) {
         },
     )
     .unwrap();
+    demo_window
+        .update(cx, |_, window, _| window.activate_window())
+        .unwrap();
     cx.activate(true);
     #[cfg(target_family = "wasm")]
     cx.refresh_windows();
