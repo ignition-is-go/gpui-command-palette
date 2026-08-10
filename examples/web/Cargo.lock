@@ -2131,6 +2131,7 @@ dependencies = [
  "gpui",
  "gpui-command-palette",
  "gpui_platform",
+ "web-sys",
 ]
 
 [[package]]

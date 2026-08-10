@@ -1,0 +1,99 @@
+name: Production CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: ${{ matrix.os }} / ${{ matrix.check }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14, windows-2022]
+        check: [build, test, fmt, clippy]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Linux GPUI libraries
+        if: runner.os == 'Linux' && (matrix.check == 'build' || matrix.check == 'test' || matrix.check == 'clippy')
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libfontconfig1-dev libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+      - name: Build (all targets and features)
+        if: matrix.check == 'build'
+        run: cargo build --locked --all-targets --all-features
+      - name: Test (all targets and features)
+        if: matrix.check == 'test'
+        run: cargo test --locked --all-targets --all-features
+      - name: Formatting
+        if: matrix.check == 'fmt'
+        run: cargo fmt --all --check
+      - name: Strict clippy
+        if: matrix.check == 'clippy'
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+
+  linux-backends:
+    name: Linux Wayland + X11 and nested native smoke
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install compositor and GPUI libraries
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libfontconfig1-dev libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev weston
+      - name: Prove both enabled Linux backends compile
+        run: cargo check --locked --all-targets --all-features
+      - name: Build native shared demo
+        run: cargo build --locked --example demo
+      - name: Smoke in a nested headless Wayland compositor
+        shell: bash
+        run: scripts/nested-wayland-smoke.sh target/debug/examples/demo
+
+  web-production:
+    name: Nightly wasm + Trunk + Chrome canvas proof
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Trunk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: trunk
+      - name: Build the shared demo for wasm
+        working-directory: examples/web
+        run: trunk build --locked --release
+      - name: Verify document-owned canvas and shared demo source
+        run: python3 scripts/verify-web-host.py
+      - name: Install browser proof runner
+        working-directory: .github/web-proof
+        run: npm ci
+      - name: Run real Chrome under Xvfb with SwiftShader
+        shell: bash
+        run: |
+          (cd examples/web && trunk serve --release --address 127.0.0.1 --port 8080) >trunk.log 2>&1 &
+          server=$!
+          trap 'kill "$server" 2>/dev/null || true; cat trunk.log' EXIT
+          for attempt in {1..60}; do curl -fsS http://127.0.0.1:8080/ >/dev/null && break; sleep 1; done
+          curl -fsS http://127.0.0.1:8080/ >/dev/null
+          xvfb-run -a npm --prefix .github/web-proof test
+      - name: Upload fixed-viewport proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrome-canvas-proof
+          path: artifacts/web-proof/
+          if-no-files-found: error

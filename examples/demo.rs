@@ -1,5 +1,61 @@
 use gpui::{div, prelude::*, px, App, Bounds, WindowBounds, WindowOptions};
 use gpui_command_palette::{Command, CommandPalette, Modifier};
+
+#[cfg(target_family = "wasm")]
+thread_local! {
+    static LAST_EXECUTION: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+#[cfg(target_family = "wasm")]
+fn record_execution(id: &str) {
+    LAST_EXECUTION.with(|value| *value.borrow_mut() = Some(id.to_owned()));
+}
+#[cfg(not(target_family = "wasm"))]
+fn record_execution(_: &str) {}
+
+#[cfg(target_family = "wasm")]
+fn json_string(value: &str) -> String {
+    format!(
+        r#""{}""#,
+        value
+            .replace('\\', r"\\")
+            .replace('"', r#"\""#)
+            .replace('\n', r"\n")
+            .replace('\r', r"\r")
+    )
+}
+
+#[cfg(target_family = "wasm")]
+fn publish_test_bridge(palette: &CommandPalette) {
+    let state = palette.state();
+    let results = state
+        .results(&palette.registry().commands())
+        .into_iter()
+        .map(|result| json_string(&result.entry.id))
+        .collect::<Vec<_>>()
+        .join(",");
+    let executed = LAST_EXECUTION.with(|value| {
+        value
+            .borrow()
+            .as_ref()
+            .map(|id| json_string(id))
+            .unwrap_or_else(|| "null".to_owned())
+    });
+    let value = format!(
+        r#"{{"open":{},"query":{},"selected":{},"depth":{},"results":[{}],"executed":{}}}"#,
+        state.is_open(),
+        json_string(state.query()),
+        state.selected_index(),
+        state.depth(),
+        results,
+        executed
+    );
+    // NOTE(ts): this same-document bridge mirrors the real palette entity only
+    // for browser CI; it neither drives state nor introduces a second UI tree.
+    if let Some(window) = web_sys::window() {
+        let _ = window.set_name(&value);
+    }
+}
+
 fn launch(cx: &mut App) {
     gpui_command_palette::init(cx);
     let bounds = Bounds::centered(None, gpui::size(px(900.), px(600.)), cx);
@@ -11,14 +67,14 @@ fn launch(cx: &mut App) {
         |_, cx| {
             let palette = cx.new(CommandPalette::new);
             let registrations = palette.read(cx).registry().register_many([
-                Command::new("file.open", "Open File", || {})
+                Command::new("file.open", "Open File", || record_execution("file.open"))
                     .description("Open a file from disk")
                     .group("File")
                     .shortcut(vec![Modifier::Main], "o"),
                 Command::submenu("theme", "Change Theme", || {
                     vec![
-                        Command::new("theme.dark", "Dark", || {}),
-                        Command::new("theme.light", "Light", || {}),
+                        Command::new("theme.dark", "Dark", || record_execution("theme.dark")),
+                        Command::new("theme.light", "Light", || record_execution("theme.light")),
                     ]
                 })
                 .searchable_children(),
@@ -26,7 +82,10 @@ fn launch(cx: &mut App) {
             for registration in registrations {
                 registration.forget()
             }
-            cx.new(|_| Demo { palette })
+            cx.new(|cx| {
+                cx.observe(&palette, |_, _, cx| cx.notify()).detach();
+                Demo { palette }
+            })
         },
     )
     .unwrap();
@@ -38,7 +97,9 @@ struct Demo {
     palette: gpui::Entity<CommandPalette>,
 }
 impl gpui::Render for Demo {
-    fn render(&mut self, _: &mut gpui::Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut gpui::Window, _cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        #[cfg(target_family = "wasm")]
+        publish_test_bridge(self.palette.read(_cx));
         div()
             .size_full()
             .bg(gpui::rgb(0x111111))
