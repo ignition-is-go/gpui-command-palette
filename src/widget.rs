@@ -175,6 +175,8 @@ impl<M: Clone + 'static> Render for CommandPalette<M> {
         };
         let mut list = div()
             .id("command-palette-results")
+            .role(gpui::Role::ListBox)
+            .aria_label("Commands")
             .flex_1()
             .overflow_y_scroll();
         if results.is_empty() {
@@ -193,6 +195,8 @@ impl<M: Clone + 'static> Render for CommandPalette<M> {
             let branch = command.is_branch();
             let row = div()
                 .id(("command-palette-row", index))
+                .role(gpui::Role::ListBoxOption)
+                .aria_selected(index == selected)
                 .flex()
                 .justify_between()
                 .items_center()
@@ -258,6 +262,8 @@ impl<M: Clone + 'static> Render for CommandPalette<M> {
             .join(" › ");
         let panel = div()
             .id("command-palette-dialog")
+            .role(gpui::Role::Dialog)
+            .aria_label("Command palette")
             .debug_selector(|| "command-palette-dialog".into())
             .track_focus(&self.focus)
             .key_context(KEY_CONTEXT)
@@ -298,6 +304,8 @@ impl<M: Clone + 'static> Render for CommandPalette<M> {
             .child(
                 div()
                     .id("command-palette-input")
+                    .role(gpui::Role::TextInput)
+                    .aria_label("Search commands")
                     .w_full()
                     .px_3()
                     .py_2()
