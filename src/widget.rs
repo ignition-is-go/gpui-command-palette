@@ -1,7 +1,7 @@
 use crate::{CommandPalettePosition, CommandPaletteTheme, CommandRegistry, PaletteState};
 use gpui::{
-    actions, div, prelude::*, px, App, Context, FocusHandle, KeyBinding, KeyDownEvent, Render,
-    Window,
+    actions, div, prelude::*, px, relative, App, Context, FocusHandle, KeyBinding, KeyDownEvent,
+    Render, Window,
 };
 actions!(
     command_palette,
@@ -333,7 +333,7 @@ impl<M: Clone + 'static> Render for CommandPalette<M> {
             .justify_center()
             .when(
                 matches!(self.position, CommandPalettePosition::TopCenter),
-                |x| x.pt(px(80.)),
+                |x| x.pt(relative(0.2)),
             )
             .when(
                 matches!(self.position, CommandPalettePosition::Center),

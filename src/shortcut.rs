@@ -2,6 +2,26 @@
 use gpui::{Keystroke, Modifiers};
 use std::fmt;
 
+fn is_mac() -> bool {
+    if cfg!(target_os = "macos") {
+        return true;
+    }
+    #[cfg(target_family = "wasm")]
+    {
+        return web_sys::window()
+            .map(|window| {
+                window
+                    .navigator()
+                    .platform()
+                    .unwrap_or_default()
+                    .contains("Mac")
+            })
+            .unwrap_or(false);
+    }
+    #[cfg(not(target_family = "wasm"))]
+    false
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Modifier {
     Main,
@@ -10,17 +30,17 @@ pub enum Modifier {
 }
 
 impl Modifier {
-    pub const fn display_name(self) -> &'static str {
+    pub fn display_name(self) -> &'static str {
         match self {
             Self::Main => {
-                if cfg!(target_os = "macos") {
+                if is_mac() {
                     "Cmd"
                 } else {
                     "Ctrl"
                 }
             }
             Self::Alt => {
-                if cfg!(target_os = "macos") {
+                if is_mac() {
                     "Opt"
                 } else {
                     "Alt"
@@ -63,8 +83,8 @@ impl Shortcut {
             platform,
             function: _,
         } = stroke.modifiers;
-        control == (has(Modifier::Main) && !cfg!(target_os = "macos"))
-            && platform == (has(Modifier::Main) && cfg!(target_os = "macos"))
+        control == (has(Modifier::Main) && !is_mac())
+            && platform == (has(Modifier::Main) && is_mac())
             && alt == has(Modifier::Alt)
             && shift == has(Modifier::Shift)
             && normalize_key(&stroke.key).eq_ignore_ascii_case(&self.key)
@@ -75,7 +95,7 @@ impl Shortcut {
             .iter()
             .map(|m| match m {
                 Modifier::Main => {
-                    if cfg!(target_os = "macos") {
+                    if is_mac() {
                         "cmd"
                     } else {
                         "ctrl"
@@ -141,7 +161,7 @@ mod tests {
                 "KeyK"
             )
             .to_string(),
-            if cfg!(target_os = "macos") {
+            if is_mac() {
                 "Cmd+Shift+K"
             } else {
                 "Ctrl+Shift+K"

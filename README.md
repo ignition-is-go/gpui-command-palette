@@ -24,4 +24,4 @@ let registration = palette.read(cx).registry().register(
 
 ## Known platform gaps
 
-The widget emits GPUI accessibility roles and labels for its dialog, search input, list box, and selected options. Pinned GPUI does not expose an explicit `aria-modal` property. GPUI also has no CSS transform or DOM transition API; positioning/appearance use GPUI layout/paint and the current release appears immediately. Text entry uses GPUI key events; full IME composition requires a host editor/input handler. `CommandPalettePosition::Custom` CSS strings cannot be source-compatible in a native renderer and is intentionally not exposed.
+The widget emits GPUI accessibility roles and labels for its dialog, search input, list box, and selected options. Pinned GPUI does not expose an explicit `aria-modal` property. The reference has no transition, so the GPUI widget likewise appears immediately. Text entry uses GPUI key events; full IME composition requires a host editor/input handler. `CommandPalettePosition::Custom` CSS strings cannot be source-compatible in a native renderer and is intentionally not exposed.
