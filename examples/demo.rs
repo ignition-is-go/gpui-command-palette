@@ -64,8 +64,9 @@ fn launch(cx: &mut App) {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             ..Default::default()
         },
-        |_, cx| {
+        |window, cx| {
             let palette = cx.new(CommandPalette::new);
+            gpui_command_palette::install_palette(&palette, window, cx);
             let registrations = palette.read(cx).registry().register_many([
                 Command::new("file.open", "Open File", || record_execution("file.open"))
                     .description("Open a file from disk")

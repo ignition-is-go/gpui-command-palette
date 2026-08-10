@@ -6,9 +6,8 @@ use crate::{
 use gpui::{
     actions, div, fill, point, prelude::*, px, relative, size, App, Bounds, Context, Element,
     ElementId, ElementInputHandler, Entity, EntityInputHandler, FocusHandle, GlobalElementId,
-    InspectorElementId, InteractiveElement, KeyBinding, KeyDownEvent, LayoutId, PaintQuad, Pixels,
-    Render, ShapedLine, SharedString, Style, TextAlign, TextRun, UTF16Selection, UnderlineStyle,
-    Window,
+    InspectorElementId, InteractiveElement, KeyDownEvent, LayoutId, PaintQuad, Pixels, Render,
+    ShapedLine, SharedString, Style, TextAlign, TextRun, UTF16Selection, UnderlineStyle, Window,
 };
 use std::ops::Range;
 actions!(
@@ -23,15 +22,6 @@ actions!(
     ]
 );
 pub const KEY_CONTEXT: &str = "CommandPalette";
-pub fn init(cx: &mut App) {
-    let binding = if crate::shortcut::is_mac() {
-        "cmd-k"
-    } else {
-        "ctrl-k"
-    };
-    cx.bind_keys([KeyBinding::new(binding, ToggleCommandPalette, None)]);
-}
-
 type ExecuteHandler<M> = std::rc::Rc<dyn Fn(&M, &mut Window, &mut App)>;
 
 pub struct CommandPalette<M: 'static = ()> {
@@ -98,6 +88,18 @@ impl<M: Clone + 'static> CommandPalette<M> {
     }
     pub fn state(&self) -> &PaletteState<M> {
         &self.state
+    }
+    /// Replace the current query and synchronize the input cursor and result selection.
+    pub fn set_query(&mut self, query: impl Into<String>, cx: &mut Context<Self>) {
+        self.state.set_query(query);
+        let end = self.state.query().len();
+        self.selected_range = end..end;
+        self.marked_range = None;
+        cx.notify();
+    }
+    /// Clear the current query and synchronize the input cursor and result selection.
+    pub fn clear_query(&mut self, cx: &mut Context<Self>) {
+        self.set_query(String::new(), cx);
     }
     pub fn with_on_execute(
         mut self,
@@ -287,11 +289,7 @@ impl<M: Clone + 'static> CommandPalette<M> {
 }
 impl<M: Clone + 'static> Render for CommandPalette<M> {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let base = div()
-            .id("command-palette-provider")
-            .on_action(cx.listener(|this, _: &ToggleCommandPalette, w, cx| this.toggle(w, cx)))
-            .on_action(cx.listener(|this, _: &OpenCommandPalette, w, cx| this.open(w, cx)))
-            .on_action(cx.listener(|this, _: &CloseCommandPalette, w, cx| this.close(w, cx)));
+        let base = div().id("command-palette-provider");
         if !self.state.is_open() {
             return base;
         }

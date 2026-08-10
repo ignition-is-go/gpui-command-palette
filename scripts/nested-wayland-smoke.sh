@@ -8,7 +8,13 @@ export XDG_RUNTIME_DIR="$runtime"
 Xvfb :99 -screen 0 1024x768x24 -nolisten tcp >target/xvfb.log 2>&1 &
 xvfb_pid=$!
 export DISPLAY=:99
-weston --backend=x11-backend.so --socket=gpui-ci --idle-time=0 --width=900 --height=600 >target/weston.log 2>&1 &
+for _ in {1..100}; do
+  [[ -S /tmp/.X11-unix/X99 ]] && break
+  kill -0 "$xvfb_pid" 2>/dev/null || { cat target/xvfb.log; exit 1; }
+  sleep .1
+done
+[[ -S /tmp/.X11-unix/X99 ]] || { cat target/xvfb.log; kill "$xvfb_pid" 2>/dev/null || true; exit 1; }
+weston --backend=x11-backend.so --socket=gpui-ci --idle-time=0 --use-pixman --width=900 --height=600 >target/weston.log 2>&1 &
 weston_pid=$!
 app_pid=
 cleanup() {
