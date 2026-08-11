@@ -20,7 +20,7 @@ let registration = palette.read(cx).registry().register(
 | Cmd/Ctrl+K and command shortcuts | GPUI actions/key bindings and `Shortcut::matches` |
 | reactive open/query/selection/navigation | `PaletteState` |
 | DOM modal | one GPUI modal render tree, focus capture/restoration, backdrop dismissal |
-| CSS default theme | typed panel, backdrop, input, item, and empty-state themes with matching defaults |
+| CSS default theme | one `CommandPaletteTheme` composed from typed panel, backdrop, input, item, and empty-state styles with matching defaults |
 
 ## Known platform gaps
 

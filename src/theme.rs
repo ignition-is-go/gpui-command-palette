@@ -37,11 +37,11 @@ pub enum CommandPalettePosition {
     },
 }
 #[derive(Clone, Copy, Debug)]
-pub struct CommandPaletteBackdropTheme {
+pub struct CommandPaletteBackdropStyle {
     pub background: Hsla,
     pub z_index: u32,
 }
-impl Default for CommandPaletteBackdropTheme {
+impl Default for CommandPaletteBackdropStyle {
     fn default() -> Self {
         Self {
             background: rgba(0x00000080).into(),
@@ -50,7 +50,7 @@ impl Default for CommandPaletteBackdropTheme {
     }
 }
 #[derive(Clone, Debug)]
-pub struct CommandPaletteTheme {
+pub struct CommandPalettePanelStyle {
     pub background: Hsla,
     pub color: Hsla,
     pub border: Hsla,
@@ -62,7 +62,7 @@ pub struct CommandPaletteTheme {
     pub font_size: Pixels,
     pub padding: Pixels,
 }
-impl Default for CommandPaletteTheme {
+impl Default for CommandPalettePanelStyle {
     fn default() -> Self {
         Self {
             background: rgb(0x1e1e1e).into(),
@@ -85,7 +85,7 @@ impl Default for CommandPaletteTheme {
     }
 }
 #[derive(Clone, Copy, Debug)]
-pub struct CommandPaletteInputTheme {
+pub struct CommandPaletteInputStyle {
     pub background: Hsla,
     pub color: Hsla,
     pub border: Hsla,
@@ -97,7 +97,7 @@ pub struct CommandPaletteInputTheme {
     pub placeholder_color: Hsla,
     pub margin_bottom: Pixels,
 }
-impl Default for CommandPaletteInputTheme {
+impl Default for CommandPaletteInputStyle {
     fn default() -> Self {
         Self {
             background: rgb(0x2a2a2a).into(),
@@ -114,7 +114,7 @@ impl Default for CommandPaletteInputTheme {
     }
 }
 #[derive(Clone, Copy, Debug)]
-pub struct CommandPaletteItemTheme {
+pub struct CommandPaletteItemStyle {
     pub padding_y: Pixels,
     pub padding_x: Pixels,
     pub border_radius: Pixels,
@@ -128,7 +128,7 @@ pub struct CommandPaletteItemTheme {
     pub shortcut_opacity: f32,
     pub shortcut_margin_left: Pixels,
 }
-impl Default for CommandPaletteItemTheme {
+impl Default for CommandPaletteItemStyle {
     fn default() -> Self {
         Self {
             padding_y: px(8.),
@@ -147,22 +147,22 @@ impl Default for CommandPaletteItemTheme {
     }
 }
 #[derive(Clone, Debug, Default)]
-pub struct CommandPaletteStyles {
-    pub palette: CommandPaletteTheme,
-    pub backdrop: CommandPaletteBackdropTheme,
-    pub input: CommandPaletteInputTheme,
-    pub item: CommandPaletteItemTheme,
-    pub empty: CommandPaletteEmptyTheme,
+pub struct CommandPaletteTheme {
+    pub palette: CommandPalettePanelStyle,
+    pub backdrop: CommandPaletteBackdropStyle,
+    pub input: CommandPaletteInputStyle,
+    pub item: CommandPaletteItemStyle,
+    pub empty: CommandPaletteEmptyStyle,
 }
 #[derive(Clone, Copy, Debug)]
-pub struct CommandPaletteEmptyTheme {
+pub struct CommandPaletteEmptyStyle {
     pub padding: Pixels,
     pub text_align: TextAlign,
     pub color: Hsla,
     pub opacity: f32,
     pub font_size: Pixels,
 }
-impl Default for CommandPaletteEmptyTheme {
+impl Default for CommandPaletteEmptyStyle {
     fn default() -> Self {
         Self {
             padding: px(12.),

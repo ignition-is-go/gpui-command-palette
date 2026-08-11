@@ -1,6 +1,6 @@
 use crate::{
-    CommandPaletteBackdropTheme, CommandPaletteEmptyTheme, CommandPaletteInputTheme,
-    CommandPaletteItemTheme, CommandPalettePosition, CommandPaletteStyles, CommandPaletteTheme,
+    CommandPaletteBackdropStyle, CommandPaletteEmptyStyle, CommandPaletteInputStyle,
+    CommandPaletteItemStyle, CommandPalettePanelStyle, CommandPalettePosition, CommandPaletteTheme,
     CommandRegistry, PaletteLength, PaletteState,
 };
 use gpui::{
@@ -24,13 +24,13 @@ actions!(
 );
 pub const KEY_CONTEXT: &str = "CommandPalette";
 type ExecuteHandler<M> = std::rc::Rc<dyn Fn(&M, &mut Window, &mut App)>;
-type StylesProvider = std::rc::Rc<dyn Fn(&App) -> CommandPaletteStyles>;
+type ThemeProvider = std::rc::Rc<dyn Fn(&App) -> CommandPaletteTheme>;
 
 pub struct CommandPalette<M: 'static = ()> {
     registry: CommandRegistry<M>,
     state: PaletteState<M>,
-    styles: CommandPaletteStyles,
-    styles_provider: Option<StylesProvider>,
+    theme: CommandPaletteTheme,
+    theme_provider: Option<ThemeProvider>,
     position: CommandPalettePosition,
     focus: FocusHandle,
     restore_focus: Option<FocusHandle>,
@@ -60,8 +60,8 @@ impl<M: Clone + 'static> CommandPalette<M> {
         Self {
             registry: CommandRegistry::new(),
             state: PaletteState::new(),
-            styles: Default::default(),
-            styles_provider: None,
+            theme: Default::default(),
+            theme_provider: None,
             position: Default::default(),
             focus: cx.focus_handle(),
             restore_focus: None,
@@ -103,72 +103,72 @@ impl<M: Clone + 'static> CommandPalette<M> {
         self.on_execute = Some(std::rc::Rc::new(handler));
         self
     }
-    /// Use a fixed set of palette styles.
+    /// Use a fixed palette theme.
     ///
-    /// This clears any previously configured style provider, so the last style
+    /// This clears any previously configured theme provider, so the last theme
     /// configuration call wins.
-    pub fn with_styles(mut self, styles: CommandPaletteStyles) -> Self {
-        self.styles = styles;
-        self.styles_provider = None;
+    pub fn with_theme(mut self, theme: CommandPaletteTheme) -> Self {
+        self.theme = theme;
+        self.theme_provider = None;
         self
     }
-    /// Resolve palette styles from application state whenever the palette renders.
-    pub fn with_styles_provider(
+    /// Resolve the palette theme from application state whenever the palette renders.
+    pub fn with_theme_provider(
         mut self,
-        provider: impl Fn(&App) -> CommandPaletteStyles + 'static,
+        provider: impl Fn(&App) -> CommandPaletteTheme + 'static,
     ) -> Self {
-        self.styles_provider = Some(std::rc::Rc::new(provider));
+        self.theme_provider = Some(std::rc::Rc::new(provider));
         self
     }
-    /// Replace the current styles and switch back to fixed-style mode.
-    pub fn set_styles(&mut self, styles: CommandPaletteStyles, cx: &mut Context<Self>) {
-        self.styles = styles;
-        self.styles_provider = None;
+    /// Replace the current theme and switch back to fixed-theme mode.
+    pub fn set_theme(&mut self, theme: CommandPaletteTheme, cx: &mut Context<Self>) {
+        self.theme = theme;
+        self.theme_provider = None;
         cx.notify();
     }
-    /// Replace the style provider used on each render.
-    pub fn set_styles_provider(
+    /// Replace the theme provider used on each render.
+    pub fn set_theme_provider(
         &mut self,
-        provider: impl Fn(&App) -> CommandPaletteStyles + 'static,
+        provider: impl Fn(&App) -> CommandPaletteTheme + 'static,
         cx: &mut Context<Self>,
     ) {
-        self.styles_provider = Some(std::rc::Rc::new(provider));
+        self.theme_provider = Some(std::rc::Rc::new(provider));
         cx.notify();
     }
-    pub fn with_theme(mut self, theme: CommandPaletteTheme) -> Self {
-        self.styles.palette = theme;
-        self.styles_provider = None;
+    pub fn with_panel_style(mut self, style: CommandPalettePanelStyle) -> Self {
+        self.theme.palette = style;
+        self.theme_provider = None;
         self
     }
-    pub fn with_backdrop_theme(mut self, theme: CommandPaletteBackdropTheme) -> Self {
-        self.styles.backdrop = theme;
-        self.styles_provider = None;
+    pub fn with_backdrop_style(mut self, style: CommandPaletteBackdropStyle) -> Self {
+        self.theme.backdrop = style;
+        self.theme_provider = None;
         self
     }
-    pub fn with_input_theme(mut self, theme: CommandPaletteInputTheme) -> Self {
-        self.styles.input = theme;
-        self.styles_provider = None;
+    pub fn with_input_style(mut self, style: CommandPaletteInputStyle) -> Self {
+        self.theme.input = style;
+        self.theme_provider = None;
         self
     }
-    pub fn with_item_theme(mut self, theme: CommandPaletteItemTheme) -> Self {
-        self.styles.item = theme;
-        self.styles_provider = None;
+    pub fn with_item_style(mut self, style: CommandPaletteItemStyle) -> Self {
+        self.theme.item = style;
+        self.theme_provider = None;
         self
     }
-    pub fn with_empty_theme(mut self, theme: CommandPaletteEmptyTheme) -> Self {
-        self.styles.empty = theme;
-        self.styles_provider = None;
+    pub fn with_empty_style(mut self, style: CommandPaletteEmptyStyle) -> Self {
+        self.theme.empty = style;
+        self.theme_provider = None;
         self
     }
     pub fn with_position(mut self, position: CommandPalettePosition) -> Self {
         self.position = position;
         self
     }
-    /// Return the styles that would be used for the current application state.
-    pub fn resolved_styles(&self, cx: &App) -> CommandPaletteStyles {
-        self.styles_provider
+    /// Return the theme that would be used for the current application state.
+    pub fn resolved_theme(&self, cx: &App) -> CommandPaletteTheme {
+        self.theme_provider
             .as_ref()
-            .map_or_else(|| self.styles.clone(), |provider| provider(cx))
+            .map_or_else(|| self.theme.clone(), |provider| provider(cx))
     }
     fn defer_execute(&self, command: crate::Command<M>, window: &Window, cx: &mut Context<Self>) {
         let window = window.window_handle();
@@ -340,12 +340,12 @@ impl<M: Clone + 'static> Render for CommandPalette<M> {
         if !self.state.is_open() {
             return base;
         }
-        let styles = self.resolved_styles(cx);
-        let theme = styles.palette;
-        let input_theme = styles.input;
-        let item_theme = styles.item;
-        let empty_theme = styles.empty;
-        let backdrop_theme = styles.backdrop;
+        let resolved_theme = self.resolved_theme(cx);
+        let theme = resolved_theme.palette;
+        let input_theme = resolved_theme.input;
+        let item_theme = resolved_theme.item;
+        let empty_theme = resolved_theme.empty;
+        let backdrop_theme = resolved_theme.backdrop;
         let commands = self.registry.commands();
         let results = self.state.results(&commands);
         self.state.clamp_selection(results.len());
@@ -806,8 +806,8 @@ impl<M: Clone + 'static> Element for PaletteInputElement<M> {
             palette.state.query().to_owned().into()
         };
         let cursor = palette.cursor_offset();
-        let styles = palette.resolved_styles(cx);
-        let theme = styles.input;
+        let resolved_theme = palette.resolved_theme(cx);
+        let theme = resolved_theme.input;
         let base = TextRun {
             len: text.len(),
             font: window.text_style().font(),
@@ -875,7 +875,7 @@ impl<M: Clone + 'static> Element for PaletteInputElement<M> {
                             bounds.bottom(),
                         ),
                     ),
-                    styles.item.selected_background.opacity(0.5),
+                    resolved_theme.item.selected_background.opacity(0.5),
                 )),
             )
         } else {
@@ -946,9 +946,9 @@ mod input_tests {
     }
 
     #[gpui::test]
-    fn style_configuration_is_last_call_wins_and_providers_resolve_live(cx: &mut TestAppContext) {
-        let fixed = CommandPaletteStyles {
-            palette: CommandPaletteTheme {
+    fn theme_configuration_is_last_call_wins_and_providers_resolve_live(cx: &mut TestAppContext) {
+        let fixed = CommandPaletteTheme {
+            palette: CommandPalettePanelStyle {
                 width: px(321.),
                 ..Default::default()
             },
@@ -957,25 +957,25 @@ mod input_tests {
         let palette = cx.update(|cx| {
             cx.new(|cx| {
                 CommandPalette::<()>::new(cx)
-                    .with_styles_provider(|_| CommandPaletteStyles {
-                        palette: CommandPaletteTheme {
+                    .with_theme_provider(|_| CommandPaletteTheme {
+                        palette: CommandPalettePanelStyle {
                             width: px(654.),
                             ..Default::default()
                         },
                         ..Default::default()
                     })
-                    .with_styles(fixed.clone())
+                    .with_theme(fixed.clone())
             })
         });
 
         palette.read_with(cx, |palette, cx| {
-            assert_eq!(palette.resolved_styles(cx).palette.width, px(321.));
+            assert_eq!(palette.resolved_theme(cx).palette.width, px(321.));
         });
 
         palette.update(cx, |palette, cx| {
-            palette.set_styles_provider(
-                |_| CommandPaletteStyles {
-                    palette: CommandPaletteTheme {
+            palette.set_theme_provider(
+                |_| CommandPaletteTheme {
+                    palette: CommandPalettePanelStyle {
                         width: px(654.),
                         ..Default::default()
                     },
@@ -985,12 +985,12 @@ mod input_tests {
             );
         });
         palette.read_with(cx, |palette, cx| {
-            assert_eq!(palette.resolved_styles(cx).palette.width, px(654.));
+            assert_eq!(palette.resolved_theme(cx).palette.width, px(654.));
         });
 
-        palette.update(cx, |palette, cx| palette.set_styles(fixed, cx));
+        palette.update(cx, |palette, cx| palette.set_theme(fixed, cx));
         palette.read_with(cx, |palette, cx| {
-            assert_eq!(palette.resolved_styles(cx).palette.width, px(321.));
+            assert_eq!(palette.resolved_theme(cx).palette.width, px(321.));
         });
     }
 
