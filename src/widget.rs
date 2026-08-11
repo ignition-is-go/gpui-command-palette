@@ -54,10 +54,7 @@ impl<M: Clone + 'static> CommandPalette<M> {
                     .as_ref()
                     .is_some_and(|shortcut| shortcut.matches(&event.keystroke))
             }) {
-                command.execute_in(window, cx);
-                if let Some(handler) = &this.on_execute {
-                    handler(&command.metadata, window, cx);
-                }
+                this.defer_execute(command, window, cx);
             }
         });
         Self {
@@ -173,6 +170,18 @@ impl<M: Clone + 'static> CommandPalette<M> {
             .as_ref()
             .map_or_else(|| self.styles.clone(), |provider| provider(cx))
     }
+    fn defer_execute(&self, command: crate::Command<M>, window: &Window, cx: &mut Context<Self>) {
+        let window = window.window_handle();
+        let on_execute = self.on_execute.clone();
+        cx.defer(move |cx| {
+            let _ = window.update(cx, |_, window, cx| {
+                command.execute_in(window, cx);
+                if let Some(handler) = &on_execute {
+                    handler(&command.metadata, window, cx);
+                }
+            });
+        });
+    }
     pub fn open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.state.is_open() {
             self.restore_focus = window.focused(cx)
@@ -233,11 +242,8 @@ impl<M: Clone + 'static> CommandPalette<M> {
             .map(|r| r.entry.clone())
         {
             if !self.state.enter(&command) {
-                command.execute_in(window, cx);
-                if let Some(handler) = &self.on_execute {
-                    handler(&command.metadata, window, cx);
-                }
-                self.close(window, cx)
+                self.close(window, cx);
+                self.defer_execute(command, window, cx)
             } else {
                 self.reset_input_selection();
                 cx.notify()
@@ -398,11 +404,8 @@ impl<M: Clone + 'static> Render for CommandPalette<M> {
                         .map(|r| r.entry.clone())
                     {
                         if !this.state.enter(&command) {
-                            command.execute_in(window, cx);
-                            if let Some(handler) = &this.on_execute {
-                                handler(&command.metadata, window, cx);
-                            }
-                            this.close(window, cx)
+                            this.close(window, cx);
+                            this.defer_execute(command, window, cx)
                         } else {
                             this.reset_input_selection();
                             cx.notify()
@@ -989,6 +992,49 @@ mod input_tests {
         palette.read_with(cx, |palette, cx| {
             assert_eq!(palette.resolved_styles(cx).palette.width, px(321.));
         });
+    }
+
+    #[gpui::test]
+    fn command_execution_can_mutate_the_same_palette_without_reentrant_access(
+        cx: &mut TestAppContext,
+    ) {
+        let (palette, cx) = cx.add_window_view(|_, cx| CommandPalette::new(cx));
+        let weak = palette.downgrade();
+        let registration = palette.read_with(cx, |palette, _| {
+            palette.registry.register(Command::with_handler(
+                "mutate-palette",
+                "Mutate Palette",
+                move |_, cx| {
+                    weak.update(cx, |palette, cx| {
+                        assert!(!palette.state.is_open());
+                        palette
+                            .registry
+                            .register(Command::new("added", "Added", || {}))
+                            .forget();
+                        cx.notify();
+                    })
+                    .unwrap();
+                },
+            ))
+        });
+
+        cx.update(|window, cx| {
+            palette.update(cx, |palette, cx| {
+                palette.open(window, cx);
+                palette.confirm(window, cx);
+            });
+        });
+        cx.run_until_parked();
+
+        palette.read_with(cx, |palette, _| {
+            assert!(!palette.state.is_open());
+            assert!(palette
+                .registry
+                .commands()
+                .iter()
+                .any(|command| command.id == "added"));
+        });
+        drop(registration);
     }
 
     #[gpui::test]
