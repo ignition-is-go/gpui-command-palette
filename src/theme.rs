@@ -146,6 +146,14 @@ impl Default for CommandPaletteItemTheme {
         }
     }
 }
+#[derive(Clone, Debug, Default)]
+pub struct CommandPaletteStyles {
+    pub palette: CommandPaletteTheme,
+    pub backdrop: CommandPaletteBackdropTheme,
+    pub input: CommandPaletteInputTheme,
+    pub item: CommandPaletteItemTheme,
+    pub empty: CommandPaletteEmptyTheme,
+}
 #[derive(Clone, Copy, Debug)]
 pub struct CommandPaletteEmptyTheme {
     pub padding: Pixels,
