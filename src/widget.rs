@@ -1,7 +1,5 @@
 use crate::{
-    CommandPaletteBackdropStyle, CommandPaletteEmptyStyle, CommandPaletteInputStyle,
-    CommandPaletteItemStyle, CommandPalettePanelStyle, CommandPalettePosition, CommandPaletteTheme,
-    CommandRegistry, PaletteLength, PaletteState,
+    CommandPalettePosition, CommandPaletteTheme, CommandRegistry, PaletteLength, PaletteState,
 };
 use gpui::{
     actions, div, fill, point, prelude::*, px, relative, size, App, Bounds, Context, Element,
@@ -10,8 +8,8 @@ use gpui::{
     ScrollHandle, ShapedLine, SharedString, Style, TextAlign, TextRun, UTF16Selection,
     UnderlineStyle, Window,
 };
-use gpui_styling::{ThemeBase, ThemeHost, ThemeProvider, ThemeSource};
-use std::ops::Range;
+use gpui_styling::{ThemeHost, ThemeProvider, ThemeSource};
+use std::{ops::Range, sync::Arc};
 actions!(
     command_palette,
     [
@@ -48,8 +46,36 @@ impl<M: Clone + 'static> ThemeHost for CommandPalette<M> {
         &self.theme_source
     }
 
-    fn theme_source_mut(&mut self) -> &mut ThemeSource<Self::Theme> {
-        &mut self.theme_source
+    fn with_theme(mut self, theme: impl Into<Arc<Self::Theme>>) -> Self {
+        self.theme_source.set_theme(theme);
+        self
+    }
+
+    fn with_theme_provider(
+        mut self,
+        provider: impl Fn(&App) -> Arc<Self::Theme> + 'static,
+    ) -> Self {
+        self.theme_source
+            .set_provider(Some(ThemeProvider::new(provider)));
+        self
+    }
+
+    fn set_theme(&mut self, theme: impl Into<Arc<Self::Theme>>, cx: &mut Context<Self>) {
+        self.theme_source.set_theme(theme);
+        cx.notify();
+    }
+
+    fn set_theme_provider(
+        &mut self,
+        provider: Option<ThemeProvider<Self::Theme>>,
+        cx: &mut Context<Self>,
+    ) {
+        self.theme_source.set_provider(provider);
+        cx.notify();
+    }
+
+    fn resolved_theme(&self, window: &Window, cx: &App) -> Arc<Self::Theme> {
+        self.theme_source.resolve(window, cx)
     }
 }
 
@@ -113,22 +139,26 @@ impl<M: Clone + 'static> CommandPalette<M> {
         self.on_execute = Some(std::rc::Rc::new(handler));
         self
     }
-    /// Use a fixed palette theme, clearing any live provider.
-    pub fn with_theme(self, theme: CommandPaletteTheme) -> Self {
+    /// Use a complete fixed palette theme, clearing any live provider.
+    pub fn with_theme(self, theme: impl Into<Arc<CommandPaletteTheme>>) -> Self {
         <Self as ThemeHost>::with_theme(self, theme)
     }
-    /// Resolve the palette theme from application state whenever the palette renders.
+    /// Resolve complete immutable palette theme snapshots from application state.
     pub fn with_theme_provider(
         self,
-        provider: impl Fn(&App) -> CommandPaletteTheme + 'static,
+        provider: impl Fn(&App) -> Arc<CommandPaletteTheme> + 'static,
     ) -> Self {
         <Self as ThemeHost>::with_theme_provider(self, provider)
     }
-    /// Replace the current theme, clear any provider, and repaint.
-    pub fn set_theme(&mut self, theme: CommandPaletteTheme, cx: &mut Context<Self>) {
+    /// Replace the complete theme, clear any provider, and repaint.
+    pub fn set_theme(
+        &mut self,
+        theme: impl Into<Arc<CommandPaletteTheme>>,
+        cx: &mut Context<Self>,
+    ) {
         <Self as ThemeHost>::set_theme(self, theme, cx);
     }
-    /// Replace the live theme provider while preserving the remembered fixed theme.
+    /// Replace or clear the snapshot provider while preserving the fixed base.
     pub fn set_theme_provider(
         &mut self,
         provider: Option<ThemeProvider<CommandPaletteTheme>>,
@@ -136,35 +166,12 @@ impl<M: Clone + 'static> CommandPalette<M> {
     ) {
         <Self as ThemeHost>::set_theme_provider(self, provider, cx);
     }
-    fn with_fixed_theme_update(self, update: impl FnOnce(&mut CommandPaletteTheme)) -> Self {
-        let mut theme = match self.theme_source.base() {
-            ThemeBase::Fixed(theme) => theme.clone(),
-            ThemeBase::Appearance(_) => unreachable!("command palette always uses a fixed base"),
-        };
-        update(&mut theme);
-        <Self as ThemeHost>::with_theme(self, theme)
-    }
-    pub fn with_panel_style(self, style: CommandPalettePanelStyle) -> Self {
-        self.with_fixed_theme_update(|theme| theme.palette = style)
-    }
-    pub fn with_backdrop_style(self, style: CommandPaletteBackdropStyle) -> Self {
-        self.with_fixed_theme_update(|theme| theme.backdrop = style)
-    }
-    pub fn with_input_style(self, style: CommandPaletteInputStyle) -> Self {
-        self.with_fixed_theme_update(|theme| theme.input = style)
-    }
-    pub fn with_item_style(self, style: CommandPaletteItemStyle) -> Self {
-        self.with_fixed_theme_update(|theme| theme.item = style)
-    }
-    pub fn with_empty_style(self, style: CommandPaletteEmptyStyle) -> Self {
-        self.with_fixed_theme_update(|theme| theme.empty = style)
-    }
     pub fn with_position(mut self, position: CommandPalettePosition) -> Self {
         self.position = position;
         self
     }
     /// Return the theme that would be used for the current window and application state.
-    pub fn resolved_theme(&self, window: &Window, cx: &App) -> CommandPaletteTheme {
+    pub fn resolved_theme(&self, window: &Window, cx: &App) -> Arc<CommandPaletteTheme> {
         <Self as ThemeHost>::resolved_theme(self, window, cx)
     }
     fn defer_execute(&self, command: crate::Command<M>, window: &Window, cx: &mut Context<Self>) {
@@ -558,7 +565,7 @@ impl<M: Clone + 'static> Render for CommandPalette<M> {
                     })
                     .child(PaletteInputElement {
                         palette: cx.entity(),
-                        theme: resolved_theme.clone(),
+                        theme: Arc::clone(&resolved_theme),
                     }),
             )
             .child(list)
@@ -754,7 +761,7 @@ impl<M: Clone + 'static> EntityInputHandler for CommandPalette<M> {
 }
 struct PaletteInputElement<M: 'static> {
     palette: Entity<CommandPalette<M>>,
-    theme: CommandPaletteTheme,
+    theme: Arc<CommandPaletteTheme>,
 }
 struct PaletteInputPrepaint {
     line: ShapedLine,
@@ -929,7 +936,7 @@ impl<M: Clone + 'static> Element for PaletteInputElement<M> {
 #[cfg(test)]
 mod input_tests {
     use super::*;
-    use crate::Command;
+    use crate::{Command, CommandPaletteInputStyle, CommandPalettePanelStyle};
     use gpui::TestAppContext;
 
     #[test]
@@ -949,96 +956,68 @@ mod input_tests {
         assert_theme_host::<CommandPalette>();
     }
 
-    #[gpui::test]
-    fn component_style_builder_restores_and_updates_remembered_fixed_theme(
-        cx: &mut TestAppContext,
-    ) {
-        let (palette, cx) = cx.add_window_view(|_, cx| {
-            CommandPalette::<()>::new(cx)
-                .with_theme(CommandPaletteTheme {
-                    palette: CommandPalettePanelStyle {
-                        width: px(321.),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                })
-                .with_theme_provider(|_| CommandPaletteTheme {
-                    palette: CommandPalettePanelStyle {
-                        width: px(654.),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                })
-                .with_input_style(CommandPaletteInputStyle {
-                    padding_y: px(7.),
-                    ..Default::default()
-                })
-        });
+    #[test]
+    fn aggregate_theme_builders_construct_one_complete_value() {
+        let theme = CommandPaletteTheme::default()
+            .with_panel_style(CommandPalettePanelStyle {
+                width: px(321.),
+                ..Default::default()
+            })
+            .with_input_style(CommandPaletteInputStyle {
+                padding_y: px(7.),
+                ..Default::default()
+            });
 
-        palette.read_with(cx, |palette, _| {
-            assert!(!palette.theme_source().has_provider());
-            let ThemeBase::Fixed(theme) = palette.theme_source().base() else {
-                panic!("command palette must retain a fixed theme");
-            };
-            assert_eq!(theme.palette.width, px(321.));
-            assert_eq!(theme.input.padding_y, px(7.));
-        });
+        assert_eq!(theme.palette.width, px(321.));
+        assert_eq!(theme.input.padding_y, px(7.));
     }
 
     #[gpui::test]
-    fn theme_configuration_is_last_call_wins_and_providers_resolve_live(cx: &mut TestAppContext) {
-        let fixed = CommandPaletteTheme {
+    fn theme_configuration_is_immutable_reversible_and_last_call_wins(cx: &mut TestAppContext) {
+        let fixed = Arc::new(CommandPaletteTheme {
             palette: CommandPalettePanelStyle {
                 width: px(321.),
                 ..Default::default()
             },
             ..Default::default()
-        };
-        let (palette, cx) = cx.add_window_view(|_, cx| {
+        });
+        let provided = Arc::new(CommandPaletteTheme {
+            palette: CommandPalettePanelStyle {
+                width: px(654.),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let builder_provider = Arc::clone(&provided);
+        let builder_fixed = Arc::clone(&fixed);
+        let (palette, cx) = cx.add_window_view(move |_, cx| {
             CommandPalette::<()>::new(cx)
-                .with_theme_provider(|_| CommandPaletteTheme {
-                    palette: CommandPalettePanelStyle {
-                        width: px(654.),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                })
-                .with_theme(fixed.clone())
+                .with_theme_provider(move |_| Arc::clone(&builder_provider))
+                .with_theme(builder_fixed)
         });
 
-        assert_eq!(
-            cx.update(|window, cx| palette.read(cx).resolved_theme(window, cx).palette.width),
-            px(321.)
-        );
+        let resolved = cx.update(|window, cx| palette.read(cx).resolved_theme(window, cx));
+        assert!(Arc::ptr_eq(&resolved, &fixed));
 
+        let setter_provider = Arc::clone(&provided);
         palette.update(cx, |palette, cx| {
             palette.set_theme_provider(
-                Some(std::rc::Rc::new(|_| CommandPaletteTheme {
-                    palette: CommandPalettePanelStyle {
-                        width: px(654.),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                })),
+                Some(ThemeProvider::new(move |_| Arc::clone(&setter_provider))),
                 cx,
             );
         });
-        assert_eq!(
-            cx.update(|window, cx| palette.read(cx).resolved_theme(window, cx).palette.width),
-            px(654.)
-        );
+        let resolved = cx.update(|window, cx| palette.read(cx).resolved_theme(window, cx));
+        assert!(Arc::ptr_eq(&resolved, &provided));
 
         palette.update(cx, |palette, cx| palette.set_theme_provider(None, cx));
-        assert_eq!(
-            cx.update(|window, cx| palette.read(cx).resolved_theme(window, cx).palette.width),
-            px(321.)
-        );
+        let resolved = cx.update(|window, cx| palette.read(cx).resolved_theme(window, cx));
+        assert!(Arc::ptr_eq(&resolved, &fixed));
 
-        palette.update(cx, |palette, cx| palette.set_theme(fixed, cx));
-        assert_eq!(
-            cx.update(|window, cx| palette.read(cx).resolved_theme(window, cx).palette.width),
-            px(321.)
-        );
+        let replacement = Arc::new(CommandPaletteTheme::default());
+        let installed = Arc::clone(&replacement);
+        palette.update(cx, |palette, cx| palette.set_theme(installed, cx));
+        let resolved = cx.update(|window, cx| palette.read(cx).resolved_theme(window, cx));
+        assert!(Arc::ptr_eq(&resolved, &replacement));
     }
 
     #[gpui::test]
@@ -1048,7 +1027,7 @@ mod input_tests {
         let (palette, cx) = cx.add_window_view(move |_, cx| {
             CommandPalette::<()>::new(cx).with_theme_provider(move |_| {
                 provider_calls.set(provider_calls.get() + 1);
-                CommandPaletteTheme::default()
+                Arc::new(CommandPaletteTheme::default())
             })
         });
         calls.set(0);
