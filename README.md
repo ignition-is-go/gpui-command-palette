@@ -11,6 +11,10 @@ let registration = palette.read(cx).registry().register(
 
 `CommandRegistry` preserves registration order, replaces duplicate IDs at the end, and unregisters dynamically when `Registration` drops. `PaletteState` and `search_commands` are renderer-independent and tested directly.
 
+## Theming
+
+`CommandPalette` implements and re-exports `gpui_styling::ThemeHost`. Use `with_theme` or `set_theme` for a fixed `CommandPaletteTheme`, and `with_theme_provider` or `set_theme_provider` for a live application-derived theme. A provider temporarily overrides the remembered fixed theme; clearing it with `set_theme_provider(None, cx)` restores that fixed theme. The complete theme is resolved once per root render and passed to retained input elements as one consistent snapshot.
+
 ## Leptos reference mapping
 
 | Leptos API/behavior | GPUI API |

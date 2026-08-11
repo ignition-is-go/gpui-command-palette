@@ -2120,6 +2120,7 @@ name = "gpui-command-palette"
 version = "0.1.0"
 dependencies = [
  "gpui",
+ "gpui-styling",
  "gpui_platform",
  "web-sys",
 ]
@@ -2132,6 +2133,13 @@ dependencies = [
  "gpui-command-palette",
  "gpui_platform",
  "web-sys",
+]
+
+[[package]]
+name = "gpui-styling"
+version = "0.1.0"
+dependencies = [
+ "gpui",
 ]
 
 [[package]]

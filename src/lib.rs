@@ -7,6 +7,7 @@ mod state;
 mod theme;
 mod widget;
 pub use command::*;
+pub use gpui_styling::{ThemeHost, ThemeProvider};
 pub use registry::*;
 pub use search::*;
 pub use shortcut::*;
