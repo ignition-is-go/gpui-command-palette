@@ -341,7 +341,7 @@ impl<M: Clone + 'static> Render for CommandPalette<M> {
             return base;
         }
         let resolved_theme = self.resolved_theme(cx);
-        let theme = resolved_theme.palette;
+        let theme = resolved_theme.palette.clone();
         let input_theme = resolved_theme.input;
         let item_theme = resolved_theme.item;
         let empty_theme = resolved_theme.empty;
@@ -561,6 +561,7 @@ impl<M: Clone + 'static> Render for CommandPalette<M> {
                     })
                     .child(PaletteInputElement {
                         palette: cx.entity(),
+                        theme: resolved_theme.clone(),
                     }),
             )
             .child(list)
@@ -756,6 +757,7 @@ impl<M: Clone + 'static> EntityInputHandler for CommandPalette<M> {
 }
 struct PaletteInputElement<M: 'static> {
     palette: Entity<CommandPalette<M>>,
+    theme: CommandPaletteTheme,
 }
 struct PaletteInputPrepaint {
     line: ShapedLine,
@@ -806,8 +808,7 @@ impl<M: Clone + 'static> Element for PaletteInputElement<M> {
             palette.state.query().to_owned().into()
         };
         let cursor = palette.cursor_offset();
-        let resolved_theme = palette.resolved_theme(cx);
-        let theme = resolved_theme.input;
+        let theme = self.theme.input;
         let base = TextRun {
             len: text.len(),
             font: window.text_style().font(),
@@ -875,7 +876,7 @@ impl<M: Clone + 'static> Element for PaletteInputElement<M> {
                             bounds.bottom(),
                         ),
                     ),
-                    resolved_theme.item.selected_background.opacity(0.5),
+                    self.theme.item.selected_background.opacity(0.5),
                 )),
             )
         } else {
@@ -992,6 +993,26 @@ mod input_tests {
         palette.read_with(cx, |palette, cx| {
             assert_eq!(palette.resolved_theme(cx).palette.width, px(321.));
         });
+    }
+
+    #[gpui::test]
+    fn theme_provider_resolves_once_per_open_root_render(cx: &mut TestAppContext) {
+        let calls = std::rc::Rc::new(std::cell::Cell::new(0));
+        let provider_calls = calls.clone();
+        let (palette, cx) = cx.add_window_view(move |_, cx| {
+            CommandPalette::<()>::new(cx).with_theme_provider(move |_| {
+                provider_calls.set(provider_calls.get() + 1);
+                CommandPaletteTheme::default()
+            })
+        });
+        calls.set(0);
+
+        cx.update(|window, cx| {
+            palette.update(cx, |palette, cx| palette.open(window, cx));
+        });
+        cx.refresh().unwrap();
+
+        assert_eq!(calls.get(), 1);
     }
 
     #[gpui::test]
