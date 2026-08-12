@@ -13,7 +13,13 @@ let registration = palette.read(cx).registry().register(
 
 ## Theming
 
-`CommandPalette` implements and re-exports `gpui_styling::ThemeHost`. Build one complete `CommandPaletteTheme` value (its consuming `with_*_style` methods are available for construction), then install it with `with_theme` or `set_theme`. Live providers return immutable `Arc<CommandPaletteTheme>` snapshots through `with_theme_provider` or `set_theme_provider`. A provider temporarily overrides the remembered fixed snapshot; clearing it with `set_theme_provider(None, cx)` restores that snapshot. The complete theme is resolved once per root render and the same `Arc` is passed to retained input elements. The widget exposes no partial theme mutators.
+Build one complete `CommandPaletteTheme` value using its consuming `with_*_style` construction methods, then explicitly install its immutable snapshot before rendering any palette:
+
+```rust
+set_command_palette_theme(cx, CommandPaletteTheme::default());
+```
+
+`set_command_palette_theme` installs or replaces the application-wide `Arc<CommandPaletteTheme>` without repainting. Import `ActiveCommandPaletteTheme` to read the installed snapshot with `cx.command_palette_theme()`. When changing themes at runtime, install all crate theme globals and call `cx.refresh_windows()` once afterward. There is intentionally no implicit fallback, initialization helper, provider, or widget-local theme API. The root resolves the ambient `Arc` once per render and passes that exact snapshot to retained input elements.
 
 ## Leptos reference mapping
 

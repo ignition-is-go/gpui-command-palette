@@ -1,5 +1,7 @@
 use gpui::{div, prelude::*, px, App, Bounds, FocusHandle, WindowBounds, WindowOptions};
-use gpui_command_palette::{Command, CommandPalette, Modifier};
+use gpui_command_palette::{
+    set_command_palette_theme, Command, CommandPalette, CommandPaletteTheme, Modifier,
+};
 
 #[cfg(target_family = "wasm")]
 thread_local! {
@@ -59,6 +61,7 @@ fn publish_test_bridge(palette: &CommandPalette) {
 }
 
 fn launch(cx: &mut App) {
+    set_command_palette_theme(cx, CommandPaletteTheme::default());
     gpui_command_palette::init(cx);
     let bounds = Bounds::centered(None, gpui::size(px(900.), px(600.)), cx);
     let demo_window = cx

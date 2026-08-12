@@ -1,4 +1,5 @@
-use gpui::{point, px, rgb, rgba, BoxShadow, Hsla, Pixels, TextAlign};
+use gpui::{point, px, rgb, rgba, App, BoxShadow, Global, Hsla, Pixels, TextAlign};
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PaletteLength {
@@ -176,6 +177,32 @@ impl CommandPaletteTheme {
         self
     }
 }
+
+struct GlobalCommandPaletteTheme(Arc<CommandPaletteTheme>);
+impl Global for GlobalCommandPaletteTheme {}
+
+/// Install or replace the application-wide command-palette theme snapshot.
+///
+/// This does not refresh windows. Applications updating live themes should
+/// install all crate theme globals, then call `App::refresh_windows` once.
+pub fn set_command_palette_theme(cx: &mut App, theme: impl Into<Arc<CommandPaletteTheme>>) {
+    cx.set_global(GlobalCommandPaletteTheme(theme.into()));
+}
+
+/// Access the explicitly installed application-wide command-palette theme.
+pub trait ActiveCommandPaletteTheme {
+    /// Return the active immutable theme snapshot.
+    ///
+    /// Panics when [`set_command_palette_theme`] has not been called.
+    fn command_palette_theme(&self) -> &Arc<CommandPaletteTheme>;
+}
+
+impl ActiveCommandPaletteTheme for App {
+    fn command_palette_theme(&self) -> &Arc<CommandPaletteTheme> {
+        &self.global::<GlobalCommandPaletteTheme>().0
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct CommandPaletteEmptyStyle {
     pub padding: Pixels,

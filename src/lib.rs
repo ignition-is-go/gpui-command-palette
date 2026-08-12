@@ -7,7 +7,6 @@ mod state;
 mod theme;
 mod widget;
 pub use command::*;
-pub use gpui_styling::{ThemeHost, ThemeProvider};
 pub use registry::*;
 pub use search::*;
 pub use shortcut::*;
@@ -153,6 +152,7 @@ mod route_tests {
 
     impl PaletteHost {
         fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+            set_command_palette_theme(cx, CommandPaletteTheme::default());
             let palette = cx.new(CommandPalette::new);
             install_palette(&palette, window, cx);
             let outside_focus = cx.focus_handle();
