@@ -11,6 +11,25 @@ let registration = palette.read(cx).registry().register(
 
 `CommandRegistry` preserves registration order, replaces duplicate IDs at the end, and unregisters dynamically when `Registration` drops. `PaletteState` and `search_commands` are renderer-independent and tested directly.
 
+## Downstream command providers
+
+After a shared `CommandPalette<()>` is installed for a window, downstream crates can import `ActiveCommandPalette` and register without retaining the palette entity:
+
+```rust
+let registrations = cx
+    .register_command_palette_commands(window, commands)
+    .expect("shared command palette is installed");
+```
+
+The returned `Registration<()>` handles own command lifetime. Retain them while the provider is active; dropping them unregisters automatically. Registration invalidates the palette immediately. After dropping scoped handles while the palette is open, call `cx.refresh_command_palette_commands(window)` for an immediate repaint. Lookup is per-window, so focused-pane or plugin commands never leak into other windows.
+
+## Ecosystem theme API convention
+
+GPUI libraries use `set_<crate>_theme(cx, theme)` for installation and
+`Active<Crate>Theme::<crate>_theme(&self)` for ambient access. The backing
+`Global<Crate>Theme(Arc<CrateTheme>)` remains private. Setters do not refresh or
+fall back; applications batch all crate-theme installs and refresh once.
+
 ## Theming
 
 Build one complete `CommandPaletteTheme` value using its consuming `with_*_style` construction methods, then explicitly install its immutable snapshot before rendering any palette:

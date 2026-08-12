@@ -15,7 +15,7 @@ pub use theme::*;
 pub use widget::*;
 
 use gpui::{App, Entity, EntityId, Global, KeyBinding, Subscription, WeakEntity, Window, WindowId};
-use std::{collections::HashMap, rc::Rc};
+use std::{any::Any, collections::HashMap, rc::Rc};
 
 type PaletteRoute = Rc<dyn Fn(PaletteRouteAction, &mut Window, &mut App) -> bool>;
 
@@ -28,6 +28,7 @@ enum PaletteRouteAction {
 
 struct InstalledPaletteRoute {
     entity_id: EntityId,
+    registry: Box<dyn Any>,
     callback: PaletteRoute,
     _release_subscription: Subscription,
 }
@@ -39,6 +40,103 @@ struct PaletteRoutes {
 }
 
 impl Global for PaletteRoutes {}
+
+/// Per-window access to the installed shared command palette.
+///
+/// These methods intentionally target `CommandPalette<()>`, the interoperable
+/// palette used by independent downstream crates. Registration handles own
+/// command lifetime: dropping a [`Registration`] unregisters its command.
+pub trait ActiveCommandPalette {
+    /// Register one command with `window`'s installed shared palette.
+    ///
+    /// Returns `None` when no `CommandPalette<()>` is installed for the window.
+    fn register_command_palette_command(
+        &mut self,
+        window: &Window,
+        command: Command<()>,
+    ) -> Option<Registration<()>>;
+
+    /// Register several commands with `window`'s installed shared palette.
+    ///
+    /// The returned handles must be retained for as long as the commands should
+    /// remain registered.
+    fn register_command_palette_commands(
+        &mut self,
+        window: &Window,
+        commands: impl IntoIterator<Item = Command<()>>,
+    ) -> Option<Vec<Registration<()>>>;
+
+    /// Invalidate `window`'s installed shared palette after scoped handles drop.
+    ///
+    /// Registration through this trait invalidates automatically. Call this
+    /// after dropping registrations while an open palette must repaint
+    /// immediately.
+    fn refresh_command_palette_commands(&mut self, window: &Window) -> bool;
+}
+
+impl ActiveCommandPalette for App {
+    fn register_command_palette_command(
+        &mut self,
+        window: &Window,
+        command: Command<()>,
+    ) -> Option<Registration<()>> {
+        let window_id = window.window_handle().window_id();
+        let (entity_id, registry) = {
+            let route = self
+                .try_global::<PaletteRoutes>()?
+                .windows
+                .get(&window_id)?;
+            let registry = route
+                .registry
+                .downcast_ref::<CommandRegistry<()>>()?
+                .clone();
+            (route.entity_id, registry)
+        };
+        let registration = registry.register(command);
+        self.notify(entity_id);
+        Some(registration)
+    }
+
+    fn register_command_palette_commands(
+        &mut self,
+        window: &Window,
+        commands: impl IntoIterator<Item = Command<()>>,
+    ) -> Option<Vec<Registration<()>>> {
+        let window_id = window.window_handle().window_id();
+        let (entity_id, registry) = {
+            let route = self
+                .try_global::<PaletteRoutes>()?
+                .windows
+                .get(&window_id)?;
+            let registry = route
+                .registry
+                .downcast_ref::<CommandRegistry<()>>()?
+                .clone();
+            (route.entity_id, registry)
+        };
+        let registrations = registry.register_many(commands);
+        self.notify(entity_id);
+        Some(registrations)
+    }
+
+    fn refresh_command_palette_commands(&mut self, window: &Window) -> bool {
+        let window_id = window.window_handle().window_id();
+        let Some(entity_id) = self
+            .try_global::<PaletteRoutes>()
+            .and_then(|routes| routes.windows.get(&window_id))
+            .and_then(|route| {
+                route
+                    .registry
+                    .is::<CommandRegistry<()>>()
+                    .then_some(route.entity_id)
+            })
+        else {
+            return false;
+        };
+        self.notify(entity_id);
+        true
+    }
+}
 
 fn dispatch_to_active_palette(action: PaletteRouteAction, cx: &mut App) {
     let Some(window_handle) = cx.active_window() else {
@@ -112,6 +210,7 @@ pub fn install_palette<M: Clone + 'static>(
     init(cx);
     let window_id = window.window_handle().window_id();
     let entity_id = palette.entity_id();
+    let registry: Box<dyn Any> = Box::new(palette.read(cx).registry().clone());
     let weak: WeakEntity<CommandPalette<M>> = palette.downgrade();
     let callback: PaletteRoute = Rc::new(move |action, window, cx| {
         weak.update(cx, |palette, cx| match action {
@@ -134,6 +233,7 @@ pub fn install_palette<M: Clone + 'static>(
         window_id,
         InstalledPaletteRoute {
             entity_id,
+            registry,
             callback,
             _release_subscription: release_subscription,
         },
@@ -222,6 +322,37 @@ mod route_tests {
         cx.run_until_parked();
         assert!(is_open(&first_palette, cx));
         assert!(is_open(&second_palette, cx));
+    }
+
+    #[gpui::test]
+    fn downstream_context_registration_is_window_scoped_and_raii(cx: &mut TestAppContext) {
+        let window = cx.add_window(PaletteHost::new);
+        let palette = window
+            .root(cx)
+            .unwrap()
+            .read_with(cx, |host, _| host.palette.as_ref().unwrap().clone());
+
+        let registration = window
+            .update(cx, |_, window, cx| {
+                cx.register_command_palette_command(
+                    window,
+                    Command::new("downstream", "Downstream Command", || {}),
+                )
+            })
+            .unwrap()
+            .expect("shared palette should be installed");
+        assert_eq!(
+            palette.read_with(cx, |palette, _| palette.registry().len()),
+            1
+        );
+
+        drop(registration);
+        assert!(palette.read_with(cx, |palette, _| palette.registry().is_empty()));
+        assert!(window
+            .update(cx, |_, window, cx| {
+                cx.refresh_command_palette_commands(window)
+            })
+            .unwrap());
     }
 
     #[gpui::test]
