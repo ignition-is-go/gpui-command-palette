@@ -1,13 +1,13 @@
 use crate::{
-    ActiveCommandPaletteTheme, CommandPalettePosition, CommandPaletteTheme, CommandRegistry,
-    PaletteLength, PaletteState,
+    ActiveCommandPaletteTheme, Command, CommandPalettePosition, CommandPaletteTheme,
+    CommandRegistry, PaletteLength, PaletteState,
 };
 use gpui::{
     actions, div, fill, point, prelude::*, px, relative, size, App, Bounds, Context, Element,
-    ElementId, ElementInputHandler, Entity, EntityInputHandler, FocusHandle, GlobalElementId,
-    InspectorElementId, InteractiveElement, KeyDownEvent, LayoutId, PaintQuad, Pixels, Render,
-    ScrollHandle, ShapedLine, SharedString, Style, TextAlign, TextRun, UTF16Selection,
-    UnderlineStyle, Window,
+    ElementId, ElementInputHandler, Entity, EntityInputHandler, EventEmitter, FocusHandle,
+    Focusable, GlobalElementId, InspectorElementId, InteractiveElement, KeyDownEvent, LayoutId,
+    PaintQuad, Pixels, Render, ScrollHandle, ShapedLine, SharedString, Style, TextAlign, TextRun,
+    UTF16Selection, UnderlineStyle, Window,
 };
 use std::{ops::Range, sync::Arc};
 actions!(
@@ -18,18 +18,25 @@ actions!(
         CloseCommandPalette,
         SelectNextCommand,
         SelectPreviousCommand,
-        ConfirmCommand
+        ConfirmCommand,
+        DismissCommandPalette
     ]
 );
 pub const KEY_CONTEXT: &str = "CommandPalette";
-type ExecuteHandler<M> = std::rc::Rc<dyn Fn(&M, &mut Window, &mut App)>;
-pub struct CommandPalette<M: 'static = ()> {
+
+/// Semantic events emitted by a caller-owned [`CommandPaletteState`] entity.
+#[derive(Clone, Debug)]
+pub enum CommandPaletteEvent<M: 'static = ()> {
+    /// A leaf command was confirmed and scheduled for execution.
+    Executed(Command<M>),
+}
+
+pub struct CommandPaletteState<M: 'static = ()> {
     registry: CommandRegistry<M>,
     state: PaletteState<M>,
     position: CommandPalettePosition,
     focus: FocusHandle,
     restore_focus: Option<FocusHandle>,
-    on_execute: Option<ExecuteHandler<M>>,
     selected_range: Range<usize>,
     marked_range: Option<Range<usize>>,
     last_layout: Option<ShapedLine>,
@@ -38,8 +45,8 @@ pub struct CommandPalette<M: 'static = ()> {
     _keystroke_subscription: gpui::Subscription,
 }
 
-impl<M: Clone + 'static> CommandPalette<M> {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+impl<M: Clone + 'static> CommandPaletteState<M> {
+    pub fn new(registry: CommandRegistry<M>, cx: &mut Context<Self>) -> Self {
         let subscription = cx.observe_keystrokes(|this, event, window, cx| {
             if this.state.is_open() {
                 return;
@@ -54,12 +61,11 @@ impl<M: Clone + 'static> CommandPalette<M> {
             }
         });
         Self {
-            registry: CommandRegistry::new(),
+            registry,
             state: PaletteState::new(),
             position: Default::default(),
             focus: cx.focus_handle(),
             restore_focus: None,
-            on_execute: None,
             selected_range: 0..0,
             marked_range: None,
             last_layout: None,
@@ -67,10 +73,6 @@ impl<M: Clone + 'static> CommandPalette<M> {
             results_scroll: ScrollHandle::new(),
             _keystroke_subscription: subscription,
         }
-    }
-    pub fn with_registry(mut self, registry: CommandRegistry<M>) -> Self {
-        self.registry = registry;
-        self
     }
     pub fn registry(&self) -> &CommandRegistry<M> {
         &self.registry
@@ -90,27 +92,15 @@ impl<M: Clone + 'static> CommandPalette<M> {
     pub fn clear_query(&mut self, cx: &mut Context<Self>) {
         self.set_query(String::new(), cx);
     }
-    pub fn with_on_execute(
-        mut self,
-        handler: impl Fn(&M, &mut Window, &mut App) + 'static,
-    ) -> Self {
-        self.on_execute = Some(std::rc::Rc::new(handler));
-        self
-    }
-    pub fn with_position(mut self, position: CommandPalettePosition) -> Self {
+    pub fn position(mut self, position: CommandPalettePosition) -> Self {
         self.position = position;
         self
     }
     fn defer_execute(&self, command: crate::Command<M>, window: &Window, cx: &mut Context<Self>) {
+        cx.emit(CommandPaletteEvent::Executed(command.clone()));
         let window = window.window_handle();
-        let on_execute = self.on_execute.clone();
         cx.defer(move |cx| {
-            let _ = window.update(cx, |_, window, cx| {
-                command.execute_in(window, cx);
-                if let Some(handler) = &on_execute {
-                    handler(&command.metadata, window, cx);
-                }
-            });
+            let _ = window.update(cx, |_, window, cx| command.execute_in(window, cx));
         });
     }
     pub fn open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -184,25 +174,6 @@ impl<M: Clone + 'static> CommandPalette<M> {
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let key = event.keystroke.key.to_ascii_lowercase();
         match key.as_str() {
-            "escape" => {
-                if self.state.depth() > 0 {
-                    self.state.back();
-                    self.reset_input_selection();
-                    cx.notify()
-                } else {
-                    self.close(window, cx)
-                }
-            }
-            "arrowdown" | "down" => {
-                let n = self.state.results(&self.registry.commands()).len();
-                self.state.select_next(n);
-                cx.notify()
-            }
-            "arrowup" | "up" => {
-                self.state.select_previous();
-                cx.notify()
-            }
-            "enter" => self.confirm(window, cx),
             "backspace" => {
                 if !self.selected_range.is_empty() {
                     self.replace_query_range(self.selected_range.clone(), "");
@@ -265,11 +236,19 @@ impl<M: Clone + 'static> CommandPalette<M> {
         }
     }
 }
-impl<M: Clone + 'static> Render for CommandPalette<M> {
+impl<M: Clone + 'static> EventEmitter<CommandPaletteEvent<M>> for CommandPaletteState<M> {}
+
+impl<M: Clone + 'static> Focusable for CommandPaletteState<M> {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus.clone()
+    }
+}
+
+impl<M: Clone + 'static> Render for CommandPaletteState<M> {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let base = div().id("command-palette-provider");
+        let root = div().id("command-palette-root");
         if !self.state.is_open() {
-            return base;
+            return root;
         }
         let resolved_theme = Arc::clone(cx.command_palette_theme());
         let theme = resolved_theme.palette.clone();
@@ -303,11 +282,14 @@ impl<M: Clone + 'static> Render for CommandPalette<M> {
         }
         for (index, result) in results.into_iter().enumerate() {
             let command = result.entry;
+            let command_id = command.id.clone();
             let description = command.description.clone();
             let shortcut = command.shortcut.as_ref().map(ToString::to_string);
             let branch = command.is_branch();
             let row = div()
-                .id(("command-palette-row", index))
+                .id(SharedString::from(format!(
+                    "command-palette-row:{command_id}"
+                )))
                 .role(gpui::Role::ListBoxOption)
                 .aria_selected(index == selected)
                 .flex()
@@ -399,7 +381,10 @@ impl<M: Clone + 'static> Render for CommandPalette<M> {
                 breadcrumbs = breadcrumbs
                     .child(
                         div()
-                            .id(("command-palette-breadcrumb", index))
+                            .id(SharedString::from(format!(
+                                "command-palette-breadcrumb:{}",
+                                level.id
+                            )))
                             .cursor_pointer()
                             .child(level.label)
                             .on_click(cx.listener(move |this, _, _, cx| {
@@ -423,13 +408,7 @@ impl<M: Clone + 'static> Render for CommandPalette<M> {
                 let key = event.keystroke.key.to_ascii_lowercase();
                 let handled = matches!(
                     key.as_str(),
-                    "escape"
-                        | "arrowdown"
-                        | "down"
-                        | "arrowup"
-                        | "up"
-                        | "enter"
-                        | "backspace"
+                    "backspace"
                         | "delete"
                         | "arrowleft"
                         | "left"
@@ -455,6 +434,15 @@ impl<M: Clone + 'static> Render for CommandPalette<M> {
                 cx.notify()
             }))
             .on_action(cx.listener(|this, _: &ConfirmCommand, w, cx| this.confirm(w, cx)))
+            .on_action(cx.listener(|this, _: &DismissCommandPalette, window, cx| {
+                if this.state.depth() > 0 {
+                    this.state.back();
+                    this.reset_input_selection();
+                    cx.notify();
+                } else {
+                    this.close(window, cx);
+                }
+            }))
             .w(theme.width)
             .max_h(theme.max_height)
             .overflow_hidden()
@@ -530,7 +518,7 @@ impl<M: Clone + 'static> Render for CommandPalette<M> {
                 panel = panel.ml(transform.x).mt(transform.y);
             }
         }
-        let backdrop = base
+        let backdrop = root
             .absolute()
             .size_full()
             .top_0()
@@ -568,7 +556,7 @@ fn utf16_to_utf8_offset(text: &str, offset: usize) -> usize {
     utf8_offset
 }
 
-impl<M: Clone + 'static> CommandPalette<M> {
+impl<M: Clone + 'static> CommandPaletteState<M> {
     fn utf16_to_utf8(&self, offset: usize) -> usize {
         utf16_to_utf8_offset(self.state.query(), offset)
     }
@@ -582,7 +570,7 @@ impl<M: Clone + 'static> CommandPalette<M> {
         self.utf8_to_utf16(range.start)..self.utf8_to_utf16(range.end)
     }
 }
-impl<M: Clone + 'static> EntityInputHandler for CommandPalette<M> {
+impl<M: Clone + 'static> EntityInputHandler for CommandPaletteState<M> {
     fn text_for_range(
         &mut self,
         range: Range<usize>,
@@ -687,7 +675,7 @@ impl<M: Clone + 'static> EntityInputHandler for CommandPalette<M> {
     }
 }
 struct PaletteInputElement<M: 'static> {
-    palette: Entity<CommandPalette<M>>,
+    palette: Entity<CommandPaletteState<M>>,
     theme: Arc<CommandPaletteTheme>,
 }
 struct PaletteInputPrepaint {
@@ -882,11 +870,11 @@ mod input_tests {
     #[test]
     fn aggregate_theme_builders_construct_one_complete_value() {
         let theme = CommandPaletteTheme::default()
-            .with_panel_style(CommandPalettePanelStyle {
+            .panel_style(CommandPalettePanelStyle {
                 width: px(321.),
                 ..Default::default()
             })
-            .with_input_style(CommandPaletteInputStyle {
+            .input_style(CommandPaletteInputStyle {
                 padding_y: px(7.),
                 ..Default::default()
             });
@@ -897,7 +885,7 @@ mod input_tests {
 
     #[gpui::test]
     fn ambient_theme_installation_is_explicit_and_preserves_arc_identity(cx: &mut TestAppContext) {
-        let first = Arc::new(CommandPaletteTheme::default().with_panel_style(
+        let first = Arc::new(CommandPaletteTheme::default().panel_style(
             CommandPalettePanelStyle {
                 width: px(321.),
                 ..Default::default()
@@ -906,7 +894,8 @@ mod input_tests {
         cx.update(|cx| set_command_palette_theme(cx, Arc::clone(&first)));
         cx.update(|cx| assert!(Arc::ptr_eq(cx.command_palette_theme(), &first)));
 
-        let (palette, cx) = cx.add_window_view(|_, cx| CommandPalette::<()>::new(cx));
+        let (palette, cx) =
+            cx.add_window_view(|_, cx| CommandPaletteState::<()>::new(CommandRegistry::new(), cx));
         cx.update(|window, cx| palette.update(cx, |palette, cx| palette.open(window, cx)));
         cx.refresh().unwrap();
 
@@ -921,7 +910,8 @@ mod input_tests {
         cx: &mut TestAppContext,
     ) {
         cx.update(|cx| set_command_palette_theme(cx, CommandPaletteTheme::default()));
-        let (palette, cx) = cx.add_window_view(|_, cx| CommandPalette::new(cx));
+        let (palette, cx) =
+            cx.add_window_view(|_, cx| CommandPaletteState::new(CommandRegistry::new(), cx));
         let weak = palette.downgrade();
         let registration = palette.read_with(cx, |palette, _| {
             palette.registry.register(Command::with_handler(
@@ -963,7 +953,8 @@ mod input_tests {
     #[gpui::test]
     fn selected_result_is_scrolled_into_view(cx: &mut TestAppContext) {
         cx.update(|cx| set_command_palette_theme(cx, CommandPaletteTheme::default()));
-        let (palette, cx) = cx.add_window_view(|_, cx| CommandPalette::new(cx));
+        let (palette, cx) =
+            cx.add_window_view(|_, cx| CommandPaletteState::new(CommandRegistry::new(), cx));
         let registrations = palette.read_with(cx, |palette, _| {
             (0..20)
                 .map(|index| {

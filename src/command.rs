@@ -99,8 +99,8 @@ impl<M: 'static> Command<M> {
     }
 }
 impl<M: Default + 'static> Command<M> {
-    /// Add a GPUI callback. Prefer portable `with_metadata` plus
-    /// `CommandPalette::with_on_execute` when the callback captures GPUI entities.
+    /// Add a GPUI-aware execution hook. Prefer portable `with_metadata` and subscribe to
+    /// [`crate::CommandPaletteEvent`] when coordinating caller-owned GPUI state.
     pub fn with_handler(
         id: impl Into<String>,
         name: impl Into<String>,

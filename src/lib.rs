@@ -43,13 +43,13 @@ impl Global for PaletteRoutes {}
 
 /// Per-window access to the installed shared command palette.
 ///
-/// These methods intentionally target `CommandPalette<()>`, the interoperable
+/// These methods intentionally target `CommandPaletteState<()>`, the interoperable
 /// palette used by independent downstream crates. Registration handles own
 /// command lifetime: dropping a [`Registration`] unregisters its command.
 pub trait ActiveCommandPalette {
     /// Register one command with `window`'s installed shared palette.
     ///
-    /// Returns `None` when no `CommandPalette<()>` is installed for the window.
+    /// Returns `None` when no `CommandPaletteState<()>` is installed for the window.
     fn register_command_palette_command(
         &mut self,
         window: &Window,
@@ -184,7 +184,13 @@ pub fn init(cx: &mut App) {
     } else {
         "ctrl-k"
     };
-    cx.bind_keys([KeyBinding::new(binding, ToggleCommandPalette, None)]);
+    cx.bind_keys([
+        KeyBinding::new(binding, ToggleCommandPalette, None),
+        KeyBinding::new("down", SelectNextCommand, Some(KEY_CONTEXT)),
+        KeyBinding::new("up", SelectPreviousCommand, Some(KEY_CONTEXT)),
+        KeyBinding::new("enter", ConfirmCommand, Some(KEY_CONTEXT)),
+        KeyBinding::new("escape", DismissCommandPalette, Some(KEY_CONTEXT)),
+    ]);
     cx.on_action::<ToggleCommandPalette>(|_, cx| {
         dispatch_to_active_palette(PaletteRouteAction::Toggle, cx)
     });
@@ -203,7 +209,7 @@ pub fn init(cx: &mut App) {
 /// window closes. This function also calls [`init`] so hosts cannot accidentally omit the global
 /// action handlers.
 pub fn install_palette<M: Clone + 'static>(
-    palette: &Entity<CommandPalette<M>>,
+    palette: &Entity<CommandPaletteState<M>>,
     window: &Window,
     cx: &mut App,
 ) {
@@ -211,7 +217,7 @@ pub fn install_palette<M: Clone + 'static>(
     let window_id = window.window_handle().window_id();
     let entity_id = palette.entity_id();
     let registry: Box<dyn Any> = Box::new(palette.read(cx).registry().clone());
-    let weak: WeakEntity<CommandPalette<M>> = palette.downgrade();
+    let weak: WeakEntity<CommandPaletteState<M>> = palette.downgrade();
     let callback: PaletteRoute = Rc::new(move |action, window, cx| {
         weak.update(cx, |palette, cx| match action {
             PaletteRouteAction::Toggle => palette.toggle(window, cx),
@@ -246,14 +252,14 @@ mod route_tests {
     use gpui::{div, prelude::*, Context, FocusHandle, Render, TestAppContext};
 
     struct PaletteHost {
-        palette: Option<Entity<CommandPalette>>,
+        palette: Option<Entity<CommandPaletteState>>,
         outside_focus: FocusHandle,
     }
 
     impl PaletteHost {
         fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
             set_command_palette_theme(cx, CommandPaletteTheme::default());
-            let palette = cx.new(CommandPalette::new);
+            let palette = cx.new(|cx| CommandPaletteState::new(CommandRegistry::new(), cx));
             install_palette(&palette, window, cx);
             let outside_focus = cx.focus_handle();
             window.focus(&outside_focus, cx);
@@ -273,7 +279,7 @@ mod route_tests {
         }
     }
 
-    fn is_open(palette: &Entity<CommandPalette>, cx: &impl gpui::AppContext) -> bool {
+    fn is_open(palette: &Entity<CommandPaletteState>, cx: &impl gpui::AppContext) -> bool {
         palette.read_with(cx, |palette, _| palette.state().is_open())
     }
 
@@ -359,7 +365,8 @@ mod route_tests {
     fn replacement_and_release_cleanup_preserve_only_the_current_route(cx: &mut TestAppContext) {
         let window = cx.add_window(PaletteHost::new);
         let window_id = window.window_id();
-        let replacement = cx.update(|cx| cx.new(CommandPalette::new));
+        let replacement =
+            cx.update(|cx| cx.new(|cx| CommandPaletteState::new(CommandRegistry::new(), cx)));
         window
             .update(cx, |_, window, cx| {
                 install_palette(&replacement, window, cx)
@@ -402,7 +409,8 @@ mod route_tests {
 
         window
             .update(cx, |_, window, cx| {
-                let palette = cx.new(CommandPalette::<()>::new);
+                let palette =
+                    cx.new(|cx| CommandPaletteState::<()>::new(CommandRegistry::new(), cx));
                 install_palette(&palette, window, cx);
                 window.remove_window();
             })

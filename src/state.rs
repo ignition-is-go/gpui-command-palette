@@ -1,6 +1,7 @@
-use crate::{search_commands, Command, SearchResult};
+use crate::{search_commands, Command, CommandId, SearchResult};
 #[derive(Clone, Debug)]
 pub struct NavigationLevel<M: 'static = ()> {
+    pub id: CommandId,
     pub label: String,
     pub items: Vec<Command<M>>,
 }
@@ -99,6 +100,7 @@ impl<M: Clone + 'static> PaletteState<M> {
     pub fn enter(&mut self, command: &Command<M>) -> bool {
         if let Some(items) = command.resolve_children() {
             self.stack.push(NavigationLevel {
+                id: command.id.clone(),
                 label: command.name.clone(),
                 items,
             });

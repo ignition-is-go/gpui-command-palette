@@ -156,23 +156,23 @@ pub struct CommandPaletteTheme {
     pub empty: CommandPaletteEmptyStyle,
 }
 impl CommandPaletteTheme {
-    pub fn with_panel_style(mut self, style: CommandPalettePanelStyle) -> Self {
+    pub fn panel_style(mut self, style: CommandPalettePanelStyle) -> Self {
         self.palette = style;
         self
     }
-    pub fn with_backdrop_style(mut self, style: CommandPaletteBackdropStyle) -> Self {
+    pub fn backdrop_style(mut self, style: CommandPaletteBackdropStyle) -> Self {
         self.backdrop = style;
         self
     }
-    pub fn with_input_style(mut self, style: CommandPaletteInputStyle) -> Self {
+    pub fn input_style(mut self, style: CommandPaletteInputStyle) -> Self {
         self.input = style;
         self
     }
-    pub fn with_item_style(mut self, style: CommandPaletteItemStyle) -> Self {
+    pub fn item_style(mut self, style: CommandPaletteItemStyle) -> Self {
         self.item = style;
         self
     }
-    pub fn with_empty_style(mut self, style: CommandPaletteEmptyStyle) -> Self {
+    pub fn empty_style(mut self, style: CommandPaletteEmptyStyle) -> Self {
         self.empty = style;
         self
     }

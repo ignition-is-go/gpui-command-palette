@@ -1,19 +1,31 @@
 # gpui-command-palette
 
-A Rust-first command palette for [Zed GPUI](https://github.com/zed-industries/zed), pinned to `08827f9`. The identical `CommandPalette` render tree is used on native targets and WebAssembly; browser hosts must use GPUI's document-owned canvas.
+A Rust-first command palette for [Zed GPUI](https://github.com/zed-industries/zed), pinned to `08827f9`. The identical `CommandPaletteState` render tree is used on native targets and WebAssembly; browser hosts must use GPUI's document-owned canvas.
 
 ```rust
-let palette = cx.new(CommandPalette::new);
-let registration = palette.read(cx).registry().register(
+let registry = CommandRegistry::new();
+let palette = cx.new(|cx| CommandPaletteState::new(registry.clone(), cx));
+let registration = registry.register(
     Command::new("file.open", "Open File", open).shortcut(vec![Modifier::Main], "o")
 );
+let subscription = cx.subscribe(&palette, |_, _, event: &CommandPaletteEvent, _| {
+    let CommandPaletteEvent::Executed(command) = event;
+    eprintln!("executed {}", command.id);
+});
 ```
+
+`CommandPaletteState` is deliberately rich caller-owned state: construct it as an
+`Entity`, retain/render that entity directly, and subscribe to its typed events.
+It implements `Render`, `Focusable`, and `EventEmitter<CommandPaletteEvent<M>>`.
+The required registry makes catalog ownership explicit; `.position(...)` is the
+only initialization builder. There is no function-style component, implicit
+entity, provider wrapper, or initialization-only state adapter.
 
 `CommandRegistry` preserves registration order, replaces duplicate IDs at the end, and unregisters dynamically when `Registration` drops. `PaletteState` and `search_commands` are renderer-independent and tested directly.
 
 ## Downstream command providers
 
-After a shared `CommandPalette<()>` is installed for a window, downstream crates can import `ActiveCommandPalette` and register without retaining the palette entity:
+After a shared `CommandPaletteState<()>` is installed for a window, downstream crates can import `ActiveCommandPalette` and register without retaining the palette entity:
 
 ```rust
 let registrations = cx
@@ -32,7 +44,7 @@ fall back; applications batch all crate-theme installs and refresh once.
 
 ## Theming
 
-Build one complete `CommandPaletteTheme` value using its consuming `with_*_style` construction methods, then explicitly install its immutable snapshot before rendering any palette:
+Build one complete `CommandPaletteTheme` value using its consuming `*_style` construction methods, then explicitly install its immutable snapshot before rendering any palette:
 
 ```rust
 set_command_palette_theme(cx, CommandPaletteTheme::default());

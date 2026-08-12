@@ -1,6 +1,7 @@
 use gpui::{div, prelude::*, px, App, Bounds, FocusHandle, WindowBounds, WindowOptions};
 use gpui_command_palette::{
-    set_command_palette_theme, Command, CommandPalette, CommandPaletteTheme, Modifier,
+    set_command_palette_theme, Command, CommandPaletteState, CommandPaletteTheme, CommandRegistry,
+    Modifier,
 };
 
 #[cfg(target_family = "wasm")]
@@ -29,7 +30,7 @@ fn json_string(value: &str) -> String {
 }
 
 #[cfg(target_family = "wasm")]
-fn publish_test_bridge(palette: &CommandPalette) {
+fn publish_test_bridge(palette: &CommandPaletteState) {
     let state = palette.state();
     let results = state
         .results(&palette.registry().commands())
@@ -71,7 +72,7 @@ fn launch(cx: &mut App) {
                 ..Default::default()
             },
             |window, cx| {
-                let palette = cx.new(CommandPalette::new);
+                let palette = cx.new(|cx| CommandPaletteState::new(CommandRegistry::new(), cx));
                 gpui_command_palette::install_palette(&palette, window, cx);
                 let registrations = palette.read(cx).registry().register_many([
                     Command::new("file.open", "Open File", || record_execution("file.open"))
@@ -112,7 +113,7 @@ fn launch(cx: &mut App) {
     cx.refresh_windows();
 }
 struct Demo {
-    palette: gpui::Entity<CommandPalette>,
+    palette: gpui::Entity<CommandPaletteState>,
     focus: FocusHandle,
 }
 impl gpui::Render for Demo {
