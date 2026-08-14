@@ -1,0 +1,9 @@
+¦ditem©dbodyyUReplace the direct Zed Git `gpui` and `gpui_platform` dependencies with an exact, corrected crates.io `gpui-unofficial` package-family release after iamnbutler/gpui-unofficial#243 is fixed and published.
+
+Scope and acceptance:
+- Update the root crate and browser example manifests and lockfiles; preserve `test-support`, Wayland, and X11 features.
+- Resolve exactly one registry-backed GPUI identity and no Zed GPUI Git source.
+- Keep text fonts consumer-owned through `CommandPaletteTheme` proportional/monospace families; the custom input shaper and shortcut rendering must use the installed theme families. Bundle no application text fonts.
+- Update CI/package-name probes and documentation.
+- Pass formatting, native tests, strict Clippy, WASM check, Trunk build, and browser smoke validation.
+- Do not ship a Git, path, or vendored GPUI workaround.gcreatedx2026-08-14T22:53:15.936560ZlcreatedByDevxtrevor.a.sargent@gmail.compcreatedByMachinegmalcolmbidx bd89719d8c294ec8b35112adf88dd08eflabelsƒdgpuiimigrationdwasmhprioritybP1iprojectIdx 1998761e673b440498571c9b9a455e3cetitlex4Migrate command palette to crates.io gpui-unofficialjchangeTypecSEThitemTypedTaskicreatedAtx2026-08-14T22:53:15.936569Zbtxx$01bc12e3-e0fc-45ff-b6e9-fc0e2799c229hsourceIdgmalcolm
