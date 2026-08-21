@@ -1,6 +1,5 @@
 [package]
 name = "gpui-command-palette"
-publish = false
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.95"
@@ -9,6 +8,9 @@ license = "MIT"
 repository = "https://github.com/ignition-is-go/gpui-command-palette"
 keywords = ["gpui", "command-palette", "wasm", "ui"]
 categories = ["gui"]
+
+[package.metadata.flux]
+tasks = ["build", "publish"]
 
 [dependencies]
 gpui = { package = "gpui-unofficial", version = "=1.16.1" }
