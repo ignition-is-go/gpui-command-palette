@@ -93,6 +93,7 @@ jobs:
       - name: Verify document-owned canvas and shared demo source
         run: python3 scripts/verify-web-host.py
       - name: Install Google Chrome stable
+        id: setup-chrome
         uses: browser-actions/setup-chrome@v1
         with:
           chrome-version: stable
@@ -107,6 +108,8 @@ jobs:
         run: npm ci
       - name: Run real Chrome under Xvfb with SwiftShader
         shell: bash
+        env:
+          CHROME_PATH: ${{ steps.setup-chrome.outputs.chrome-path }}
         run: |
           (cd examples/web && trunk serve --release --address 127.0.0.1 --port 8080) >trunk.log 2>&1 &
           server=$!

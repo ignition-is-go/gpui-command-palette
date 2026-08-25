@@ -37,7 +37,7 @@ function assertScreenshotSanity(file) {
 test("document-owned GPUI canvas survives full real-keyboard palette flow", async () => {
   fs.mkdirSync(out, { recursive: true });
   const browser = await chromium.launch({
-    channel: "chrome",
+    executablePath: process.env.CHROME_PATH,
     headless: false,
     args: [
       "--enable-unsafe-webgpu",
