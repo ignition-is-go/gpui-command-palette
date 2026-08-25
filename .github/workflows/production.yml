@@ -15,7 +15,7 @@ concurrency:
 jobs:
   publish-dry-run:
     name: crates.io publish dry run
-    runs-on: ubuntu-24.04
+    runs-on: public-ci
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -30,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-14, windows-2022]
+        os: [public-ci, macos-14, windows-2022]
         check: [build, test, fmt, clippy]
     runs-on: ${{ matrix.os }}
     steps:
@@ -57,7 +57,7 @@ jobs:
 
   linux-backends:
     name: Linux Wayland + X11 and nested native smoke
-    runs-on: ubuntu-24.04
+    runs-on: public-ci
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -74,7 +74,7 @@ jobs:
 
   web-production:
     name: Nightly wasm + Trunk + Chrome canvas proof
-    runs-on: ubuntu-24.04
+    runs-on: public-ci
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
