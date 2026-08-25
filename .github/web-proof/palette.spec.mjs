@@ -36,11 +36,17 @@ function assertScreenshotSanity(file) {
 
 test("document-owned GPUI canvas survives full real-keyboard palette flow", async () => {
   fs.mkdirSync(out, { recursive: true });
-  const browser = process.env.CHROME_CDP_URL
+  const externallyManaged = Boolean(process.env.CHROME_CDP_URL);
+  const browser = externallyManaged
     ? await chromium.connectOverCDP(process.env.CHROME_CDP_URL)
     : await chromium.launch({ executablePath: process.env.CHROME_PATH, headless: false });
-  const context = await browser.newContext({ viewport: { width: 900, height: 600 }, deviceScaleFactor: 1 });
+  // CDP attaches to Chrome's persistent default context. Creating an
+  // incognito context here can wedge Chromium under the Kata runtime.
+  const context = externallyManaged
+    ? browser.contexts()[0]
+    : await browser.newContext({ viewport: { width: 900, height: 600 }, deviceScaleFactor: 1 });
   const page = await context.newPage();
+  await page.setViewportSize({ width: 900, height: 600 });
   const cdp = await context.newCDPSession(page);
   await page.goto(demoUrl, { waitUntil: "networkidle" });
   await expect.poll(() => page.locator("canvas").count()).toBe(1);
@@ -98,9 +104,8 @@ test("document-owned GPUI canvas survives full real-keyboard palette flow", asyn
   await expectBridge(cdp, { open: true });
   await page.keyboard.press("Escape");
   await expectBridge(cdp, { open: false });
-  if (process.env.CHROME_CDP_URL) {
-    await context.close();
-  } else {
+  await page.close();
+  if (!externallyManaged) {
     await browser.close();
   }
 });
