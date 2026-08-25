@@ -92,6 +92,11 @@ jobs:
         run: trunk build --locked --release
       - name: Verify document-owned canvas and shared demo source
         run: python3 scripts/verify-web-host.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: .github/web-proof/package-lock.json
       - name: Install browser proof runner
         working-directory: .github/web-proof
         run: npm ci
