@@ -98,5 +98,9 @@ test("document-owned GPUI canvas survives full real-keyboard palette flow", asyn
   await expectBridge(cdp, { open: true });
   await page.keyboard.press("Escape");
   await expectBridge(cdp, { open: false });
-  await browser.close();
+  if (process.env.CHROME_CDP_URL) {
+    await context.close();
+  } else {
+    await browser.close();
+  }
 });

@@ -129,7 +129,7 @@ jobs:
           trap 'kill "$chrome" "$display" "$server" 2>/dev/null || true; cat chrome.log trunk.log' EXIT
           for attempt in {1..60}; do curl -fsS http://127.0.0.1:9222/json/version >/dev/null && break; sleep 1; done
           curl -fsS http://127.0.0.1:9222/json/version >/dev/null
-          CHROME_CDP_URL=http://127.0.0.1:9222 npm --prefix .github/web-proof test
+          CHROME_CDP_URL=http://127.0.0.1:9222 timeout 180 npm --prefix .github/web-proof test
       - name: Upload fixed-viewport proof
         if: always()
         uses: actions/upload-artifact@v4
