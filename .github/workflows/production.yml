@@ -31,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [public-ci, macos-14, windows-2022]
+        os: [public-ci, macos-14, public-ci-windows]
         check: [build, test, fmt, clippy]
     runs-on: ${{ matrix.os }}
     steps:
