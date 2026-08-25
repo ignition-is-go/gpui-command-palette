@@ -2,6 +2,7 @@ name: Production CI
 
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -15,13 +16,13 @@ concurrency:
 jobs:
   publish-dry-run:
     name: crates.io publish dry run
-    runs-on: ubuntu-24.04
+    runs-on: public-ci
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install Linux GPUI libraries
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libfontconfig1-dev libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+        run: sudo sed -i 's|http://|https://|g' /etc/apt/sources.list.d/ubuntu.sources && sudo apt-get update && sudo apt-get install -y build-essential pkg-config libasound2-dev libfontconfig1-dev libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
       - name: Verify the crate is publishable
         run: cargo publish --dry-run --allow-dirty
 
@@ -30,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-14, windows-2022]
+        os: [public-ci, macos-14, windows-2022]
         check: [build, test, fmt, clippy]
     runs-on: ${{ matrix.os }}
     steps:
@@ -41,7 +42,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install Linux GPUI libraries
         if: runner.os == 'Linux' && (matrix.check == 'build' || matrix.check == 'test' || matrix.check == 'clippy')
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libfontconfig1-dev libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+        run: sudo sed -i 's|http://|https://|g' /etc/apt/sources.list.d/ubuntu.sources && sudo apt-get update && sudo apt-get install -y build-essential pkg-config libasound2-dev libfontconfig1-dev libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
       - name: Build (all targets and features)
         if: matrix.check == 'build'
         run: cargo build --locked --all-targets --all-features
@@ -57,13 +58,13 @@ jobs:
 
   linux-backends:
     name: Linux Wayland + X11 and nested native smoke
-    runs-on: ubuntu-24.04
+    runs-on: public-ci
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install compositor and GPUI libraries
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libfontconfig1-dev libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev weston xvfb
+        run: sudo sed -i 's|http://|https://|g' /etc/apt/sources.list.d/ubuntu.sources && sudo apt-get update && sudo apt-get install -y build-essential pkg-config libasound2-dev libfontconfig1-dev libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev weston xvfb
       - name: Prove both enabled Linux backends compile
         run: cargo check --locked --all-targets --all-features
       - name: Build native shared demo
@@ -74,9 +75,10 @@ jobs:
 
   web-production:
     name: Nightly wasm + Trunk + Chrome canvas proof
-    runs-on: ubuntu-24.04
+    runs-on: public-ci
     steps:
       - uses: actions/checkout@v4
+      - run: sudo sed -i 's|http://|https://|g' /etc/apt/sources.list.d/ubuntu.sources && sudo apt-get update && sudo apt-get install -y build-essential pkg-config xvfb libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 libcairo2 libcups2t64 libdbus-1-3 libexpat1 libgbm1 libglib2.0-0t64 libnss3 libpango-1.0-0 libxcomposite1 libxdamage1 libxfixes3 libxkbcommon0 libxrandr2
       - uses: dtolnay/rust-toolchain@nightly
         with:
           targets: wasm32-unknown-unknown
@@ -90,18 +92,44 @@ jobs:
         run: trunk build --locked --release
       - name: Verify document-owned canvas and shared demo source
         run: python3 scripts/verify-web-host.py
+      - name: Install Google Chrome stable
+        id: setup-chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+          install-dependencies: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: .github/web-proof/package-lock.json
       - name: Install browser proof runner
         working-directory: .github/web-proof
         run: npm ci
       - name: Run real Chrome under Xvfb with SwiftShader
         shell: bash
+        env:
+          CHROME_PATH: ${{ steps.setup-chrome.outputs.chrome-path }}
         run: |
           (cd examples/web && trunk serve --release --address 127.0.0.1 --port 8080) >trunk.log 2>&1 &
           server=$!
           trap 'kill "$server" 2>/dev/null || true; cat trunk.log' EXIT
           for attempt in {1..60}; do curl -fsS http://127.0.0.1:8080/ >/dev/null && break; sleep 1; done
           curl -fsS http://127.0.0.1:8080/ >/dev/null
-          xvfb-run -a npm --prefix .github/web-proof test
+          Xvfb :99 -screen 0 1280x1024x24 -nolisten tcp >xvfb.log 2>&1 &
+          display=$!
+          export DISPLAY=:99
+          "$CHROME_PATH" --no-sandbox --no-first-run --no-default-browser-check \
+            --disable-dev-shm-usage --enable-unsafe-webgpu --enable-unsafe-swiftshader \
+            --use-angle=swiftshader --use-vulkan=swiftshader \
+            --enable-features=Vulkan,UseSkiaRenderer \
+            --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 \
+            --user-data-dir=/tmp/gpui-command-palette-chrome about:blank >chrome.log 2>&1 &
+          chrome=$!
+          trap 'kill "$chrome" "$display" "$server" 2>/dev/null || true; cat chrome.log trunk.log' EXIT
+          for attempt in {1..60}; do curl -fsS http://127.0.0.1:9222/json/version >/dev/null && break; sleep 1; done
+          curl -fsS http://127.0.0.1:9222/json/version >/dev/null
+          CHROME_CDP_URL=http://127.0.0.1:9222 timeout 180 npm --prefix .github/web-proof test
       - name: Upload fixed-viewport proof
         if: always()
         uses: actions/upload-artifact@v4

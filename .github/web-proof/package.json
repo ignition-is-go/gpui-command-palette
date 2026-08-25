@@ -1,1 +1,1 @@
-{"private":true,"scripts":{"test":"playwright test"},"devDependencies":{"@playwright/test":"1.51.1","pngjs":"7.0.0"}}
+{"private":true,"scripts":{"test":"node palette.spec.mjs"},"devDependencies":{"pngjs":"7.0.0"}}
