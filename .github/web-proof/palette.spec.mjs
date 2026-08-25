@@ -36,18 +36,9 @@ function assertScreenshotSanity(file) {
 
 test("document-owned GPUI canvas survives full real-keyboard palette flow", async () => {
   fs.mkdirSync(out, { recursive: true });
-  const browser = await chromium.launch({
-    executablePath: process.env.CHROME_PATH,
-    headless: false,
-    args: [
-      "--enable-unsafe-webgpu",
-      "--enable-unsafe-swiftshader",
-      "--use-angle=swiftshader",
-      "--use-vulkan=swiftshader",
-      "--enable-features=Vulkan,UseSkiaRenderer",
-      "--disable-gpu-sandbox",
-    ],
-  });
+  const browser = process.env.CHROME_CDP_URL
+    ? await chromium.connectOverCDP(process.env.CHROME_CDP_URL)
+    : await chromium.launch({ executablePath: process.env.CHROME_PATH, headless: false });
   const context = await browser.newContext({ viewport: { width: 900, height: 600 }, deviceScaleFactor: 1 });
   const page = await context.newPage();
   const cdp = await context.newCDPSession(page);

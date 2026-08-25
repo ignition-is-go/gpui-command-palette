@@ -116,7 +116,20 @@ jobs:
           trap 'kill "$server" 2>/dev/null || true; cat trunk.log' EXIT
           for attempt in {1..60}; do curl -fsS http://127.0.0.1:8080/ >/dev/null && break; sleep 1; done
           curl -fsS http://127.0.0.1:8080/ >/dev/null
-          xvfb-run -a npm --prefix .github/web-proof test
+          Xvfb :99 -screen 0 1280x1024x24 -nolisten tcp >xvfb.log 2>&1 &
+          display=$!
+          export DISPLAY=:99
+          "$CHROME_PATH" --no-sandbox --no-first-run --no-default-browser-check \
+            --disable-dev-shm-usage --enable-unsafe-webgpu --enable-unsafe-swiftshader \
+            --use-angle=swiftshader --use-vulkan=swiftshader \
+            --enable-features=Vulkan,UseSkiaRenderer \
+            --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 \
+            --user-data-dir=/tmp/gpui-command-palette-chrome about:blank >chrome.log 2>&1 &
+          chrome=$!
+          trap 'kill "$chrome" "$display" "$server" 2>/dev/null || true; cat chrome.log trunk.log' EXIT
+          for attempt in {1..60}; do curl -fsS http://127.0.0.1:9222/json/version >/dev/null && break; sleep 1; done
+          curl -fsS http://127.0.0.1:9222/json/version >/dev/null
+          CHROME_CDP_URL=http://127.0.0.1:9222 npm --prefix .github/web-proof test
       - name: Upload fixed-viewport proof
         if: always()
         uses: actions/upload-artifact@v4
