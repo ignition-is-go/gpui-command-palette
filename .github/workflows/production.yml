@@ -27,13 +27,18 @@ jobs:
         run: cargo publish --dry-run --allow-dirty
 
   native:
-    name: ${{ matrix.os }} / ${{ matrix.check }}
+    name: ${{ matrix.runner.name }} / ${{ matrix.check }}
     strategy:
       fail-fast: false
       matrix:
-        os: [public-ci, macos-14, public-ci-windows]
+        runner:
+          - {name: Linux, group: public-ci, labels: public-ci}
+          - {name: macOS, group: ephemeral-macos, labels: public-ci-macos}
+          - {name: Windows, group: ephemeral-windows, labels: public-ci-windows}
         check: [build, test, fmt, clippy]
-    runs-on: ${{ matrix.os }}
+    runs-on:
+      group: ${{ matrix.runner.group }}
+      labels: ${{ matrix.runner.labels }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
