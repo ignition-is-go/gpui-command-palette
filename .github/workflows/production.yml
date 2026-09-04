@@ -87,7 +87,7 @@ jobs:
           compiler-cache-access-key: ${{ secrets.CI_CACHE_ACCESS_KEY }}
           compiler-cache-secret-key: ${{ secrets.CI_CACHE_SECRET_KEY }}
       - name: Install compositor and GPUI libraries
-        run: sudo sed -i 's|http://|https://|g' /etc/apt/sources.list.d/ubuntu.sources && sudo apt-get update && sudo apt-get install -y build-essential pkg-config libasound2-dev libfontconfig1-dev libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev weston xvfb
+        run: sudo sed -i 's|http://|https://|g' /etc/apt/sources.list.d/ubuntu.sources && sudo apt-get update && sudo apt-get install -y build-essential pkg-config fonts-dejavu-core libasound2-dev libfontconfig1-dev libwayland-dev libxkbcommon-x11-dev libx11-xcb-dev libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev weston xvfb
       - name: Prove both enabled Linux backends compile
         run: cargo check --locked --all-targets --all-features
       - name: Build native shared demo
