@@ -1,4 +1,6 @@
-use gpui::{point, px, rgb, rgba, App, BoxShadow, Global, Hsla, Pixels, TextAlign};
+use gpui::{
+    point, px, relative, rgb, rgba, App, BoxShadow, DefiniteLength, Global, Hsla, Pixels, TextAlign,
+};
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -61,7 +63,14 @@ pub struct CommandPalettePanelStyle {
     pub max_height: Pixels,
     pub shadow: BoxShadow,
     pub font_size: Pixels,
+    /// Line height of every text line in the palette. The default matches a
+    /// browser's `line-height: normal` for common UI fonts.
+    pub line_height: DefiniteLength,
     pub padding: Pixels,
+    /// Least space kept between the panel and each side of the window; the
+    /// panel narrows below `width` to keep it, like CSS
+    /// `min(width, 100vw - 2 * margin)`.
+    pub viewport_margin: Pixels,
 }
 impl Default for CommandPalettePanelStyle {
     fn default() -> Self {
@@ -81,7 +90,9 @@ impl Default for CommandPalettePanelStyle {
                 inset: false,
             },
             font_size: px(14.),
+            line_height: relative(1.2),
             padding: px(8.),
+            viewport_margin: px(0.),
         }
     }
 }

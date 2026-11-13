@@ -8,6 +8,9 @@ pub struct SearchResult<M: 'static = ()> {
     pub entry: Command<M>,
     pub score: u32,
     pub catalog_index: usize,
+    /// The submenu a searchable child was promoted from, shown as the heading
+    /// of its result group.
+    pub parent: Option<String>,
 }
 
 /// Reference-compatible case-insensitive substring filtering.
@@ -23,16 +26,13 @@ pub fn search_commands<M: Clone + 'static>(
     let mut candidates = Vec::new();
     for command in commands {
         if query.is_empty() || matches_query(command, &query) {
-            candidates.push(command.clone());
+            candidates.push((command.clone(), None));
         }
         if !query.is_empty() && command.searches_children() {
             if let Some(children) = command.resolve_children() {
-                for mut child in children {
+                for child in children {
                     if matches_query(&child, &query) {
-                        if child.description.is_none() {
-                            child.description = Some(command.name.clone());
-                        }
-                        candidates.push(child);
+                        candidates.push((child, Some(command.name.clone())));
                     }
                 }
             }
@@ -42,11 +42,12 @@ pub fn search_commands<M: Clone + 'static>(
     candidates
         .into_iter()
         .enumerate()
-        .filter(|(_, c)| seen.insert(c.id.clone()))
-        .map(|(catalog_index, entry)| SearchResult {
+        .filter(|(_, (c, _))| seen.insert(c.id.clone()))
+        .map(|(catalog_index, (entry, parent))| SearchResult {
             entry,
             score: 0,
             catalog_index,
+            parent,
         })
         .collect()
 }
@@ -106,5 +107,17 @@ mod tests {
             ["same", "dawn"]
         );
         assert_eq!(out[1].entry.description.as_deref(), Some("kept"));
+        assert_eq!(out[0].parent, None);
+        assert_eq!(out[1].parent.as_deref(), Some("Open Scene"));
+    }
+    #[test]
+    fn promoted_children_keep_their_own_description() {
+        let branch = Command::submenu("scenes", "Open Scene", || {
+            vec![Command::new("sunset", "Sunset", || {})]
+        })
+        .searchable_children();
+        let out = search_commands(&[branch], "sunset");
+        assert_eq!(out[0].entry.description, None);
+        assert_eq!(out[0].parent.as_deref(), Some("Open Scene"));
     }
 }

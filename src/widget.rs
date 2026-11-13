@@ -245,7 +245,7 @@ impl<M: Clone + 'static> Focusable for CommandPaletteState<M> {
 }
 
 impl<M: Clone + 'static> Render for CommandPaletteState<M> {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let root = div().id("command-palette-root");
         if !self.state.is_open() {
             return root;
@@ -260,9 +260,7 @@ impl<M: Clone + 'static> Render for CommandPaletteState<M> {
         let results = self.state.results(&commands);
         self.state.clamp_selection(results.len());
         let selected = self.state.selected_index();
-        if !results.is_empty() {
-            self.results_scroll.scroll_to_item(selected);
-        }
+        let has_results = !results.is_empty();
         let mut list = div()
             .id("command-palette-results")
             .role(gpui::Role::ListBox)
@@ -280,16 +278,44 @@ impl<M: Clone + 'static> Render for CommandPaletteState<M> {
                     .child("No commands found"),
             );
         }
+        // Consecutive results promoted from one submenu share a heading, which
+        // is a list child of its own; `selected_child` counts it.
+        let mut heading: Option<String> = None;
+        let mut groups = 0;
+        let mut selected_child = selected;
         for (index, result) in results.into_iter().enumerate() {
+            if result.parent.is_some() && result.parent != heading {
+                let label = result.parent.clone().unwrap_or_default();
+                let group = groups;
+                groups += 1;
+                if index <= selected {
+                    selected_child += 1;
+                }
+                let selector = format!("command-palette-group:{label}");
+                let header = div()
+                    .debug_selector(move || selector)
+                    .pt(px(6.))
+                    .pb(px(4.))
+                    .px(px(12.))
+                    .bg(theme.background)
+                    .text_color(item_theme.shortcut_color)
+                    .text_size(px(11.))
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .child(label);
+                list = list.child(crate::part_tag::tag_part(cx, header, || {
+                    format!("command-palette.group[{group}]").into()
+                }));
+            }
+            heading = result.parent;
             let command = result.entry;
             let command_id = command.id.clone();
             let description = command.description.clone();
             let shortcut = command.shortcut.as_ref().map(ToString::to_string);
             let branch = command.is_branch();
+            let row_selector = format!("command-palette-row:{command_id}");
             let row = div()
-                .id(SharedString::from(format!(
-                    "command-palette-row:{command_id}"
-                )))
+                .id(SharedString::from(row_selector.clone()))
+                .debug_selector(move || row_selector)
                 .role(gpui::Role::ListBoxOption)
                 .aria_selected(index == selected)
                 .flex()
@@ -351,7 +377,12 @@ impl<M: Clone + 'static> Render for CommandPaletteState<M> {
                                 .child(div().text_size(px(16.)).child("›"))
                         }),
                 );
-            list = list.child(row)
+            list = list.child(crate::part_tag::tag_part(cx, row, || {
+                format!("command-palette.row[{index}]").into()
+            }))
+        }
+        if has_results {
+            self.results_scroll.scroll_to_item(selected_child);
         }
         let navigation = self.state.navigation().to_vec();
         let mut breadcrumbs = div()
@@ -444,6 +475,7 @@ impl<M: Clone + 'static> Render for CommandPaletteState<M> {
                 }
             }))
             .w(theme.width)
+            .max_w(window.viewport_size().width - theme.viewport_margin * 2.)
             .max_h(theme.max_height)
             .overflow_hidden()
             .p(theme.padding)
@@ -455,9 +487,11 @@ impl<M: Clone + 'static> Render for CommandPaletteState<M> {
             .bg(theme.background)
             .text_color(theme.color)
             .text_size(theme.font_size)
+            .line_height(theme.line_height)
             .shadow(vec![theme.shadow.clone()])
             .when(self.state.depth() > 0, |x| x.child(breadcrumbs))
-            .child(
+            .child(crate::part_tag::tag_part(
+                cx,
                 div()
                     .id("command-palette-input")
                     .role(gpui::Role::TextInput)
@@ -482,7 +516,8 @@ impl<M: Clone + 'static> Render for CommandPaletteState<M> {
                         palette: cx.entity(),
                         theme: Arc::clone(&resolved_theme),
                     }),
-            )
+                || "command-palette.input".into(),
+            ))
             .child(list)
             .on_click(|_, _, cx| cx.stop_propagation());
         if let CommandPalettePosition::Custom {
@@ -518,6 +553,21 @@ impl<M: Clone + 'static> Render for CommandPaletteState<M> {
                 panel = panel.ml(transform.x).mt(transform.y);
             }
         }
+        let panel = crate::part_tag::tag_part(cx, panel, || "command-palette".into());
+        // A CSS `top: 20%` resolves against the window height; padding would
+        // resolve against its width, so the panel hangs from an absolute row.
+        let panel = match self.position {
+            CommandPalettePosition::TopCenter => div()
+                .absolute()
+                .top(relative(0.2))
+                .left_0()
+                .right_0()
+                .flex()
+                .justify_center()
+                .child(panel)
+                .into_any_element(),
+            _ => panel,
+        };
         let backdrop = root
             .absolute()
             .size_full()
@@ -528,10 +578,6 @@ impl<M: Clone + 'static> Render for CommandPaletteState<M> {
             .when(
                 !matches!(self.position, CommandPalettePosition::Custom { .. }),
                 |x| x.justify_center(),
-            )
-            .when(
-                matches!(self.position, CommandPalettePosition::TopCenter),
-                |x| x.pt(relative(0.2)),
             )
             .when(
                 matches!(self.position, CommandPalettePosition::Center),
@@ -993,5 +1039,145 @@ mod input_tests {
         });
 
         drop(registrations);
+    }
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use crate::{
+        set_command_palette_theme, Command, CommandPalettePanelStyle, CommandPaletteState,
+        CommandPaletteTheme, CommandRegistry,
+    };
+    use gpui::{px, size, AnyElement, SharedString, TestAppContext, VisualTestContext};
+    use std::cell::RefCell;
+
+    /// Opens a palette in a 1000x700 window holding `commands`, filtered by `query`.
+    fn open<'a>(
+        cx: &'a mut TestAppContext,
+        theme: CommandPaletteTheme,
+        commands: Vec<Command>,
+        query: &str,
+    ) -> &'a mut VisualTestContext {
+        cx.update(|cx| set_command_palette_theme(cx, theme));
+        let (palette, cx) =
+            cx.add_window_view(|_, cx| CommandPaletteState::new(CommandRegistry::new(), cx));
+        cx.simulate_resize(size(px(1000.), px(700.)));
+        palette.read_with(cx, |palette, _| {
+            for command in commands {
+                palette.registry().register(command).forget();
+            }
+        });
+        let query = query.to_owned();
+        cx.update(|window, cx| {
+            palette.update(cx, |palette, cx| {
+                palette.open(window, cx);
+                palette.set_query(query, cx);
+            })
+        });
+        cx.run_until_parked();
+        cx
+    }
+
+    #[gpui::test]
+    fn top_center_sits_a_fifth_of_the_window_height_down(cx: &mut TestAppContext) {
+        let cx = open(
+            cx,
+            CommandPaletteTheme::default(),
+            vec![Command::new("a", "Alpha", || {})],
+            "",
+        );
+        let panel = cx.debug_bounds("command-palette-dialog").unwrap();
+        assert_eq!(panel.top(), px(140.));
+        assert_eq!(panel.left(), px(250.));
+    }
+
+    #[gpui::test]
+    fn panel_keeps_its_viewport_margin(cx: &mut TestAppContext) {
+        let theme = CommandPaletteTheme::default().panel_style(CommandPalettePanelStyle {
+            width: px(990.),
+            viewport_margin: px(16.),
+            ..Default::default()
+        });
+        let cx = open(cx, theme, vec![Command::new("a", "Alpha", || {})], "");
+        let panel = cx.debug_bounds("command-palette-dialog").unwrap();
+        assert_eq!(panel.size.width, px(968.));
+        assert_eq!(panel.left(), px(16.));
+    }
+
+    #[gpui::test]
+    fn a_one_line_row_is_its_padding_plus_one_line(cx: &mut TestAppContext) {
+        let cx = open(
+            cx,
+            CommandPaletteTheme::default(),
+            vec![Command::new("a", "Alpha", || {})],
+            "",
+        );
+        let row = cx.debug_bounds("command-palette-row:a").unwrap();
+        // 8px padding above and below one 14px line at line-height 1.2, which
+        // GPUI rounds to whole pixels: 16.8 -> 17.
+        assert_eq!(row.size.height, px(33.));
+    }
+
+    #[gpui::test]
+    fn promoted_children_are_grouped_under_their_parent(cx: &mut TestAppContext) {
+        let scenes = Command::submenu("scenes", "Open Scene", || {
+            vec![
+                Command::new("sunset-exterior", "Sunset Exterior", || {}),
+                Command::new("sunset-interior", "Sunset Interior", || {}),
+            ]
+        })
+        .searchable_children();
+        let cx = open(
+            cx,
+            CommandPaletteTheme::default(),
+            vec![Command::new("sunset", "Sunset", || {}), scenes],
+            "sunset",
+        );
+        let heading = cx
+            .debug_bounds("command-palette-group:Open Scene")
+            .expect("group heading");
+        let ungrouped = cx.debug_bounds("command-palette-row:sunset").unwrap();
+        let first = cx
+            .debug_bounds("command-palette-row:sunset-exterior")
+            .unwrap();
+        let second = cx
+            .debug_bounds("command-palette-row:sunset-interior")
+            .unwrap();
+        assert!(ungrouped.bottom() <= heading.top());
+        assert_eq!(heading.bottom(), first.top());
+        assert_eq!(first.bottom(), second.top());
+        assert!(cx.debug_bounds("command-palette-group:Sunset").is_none());
+    }
+
+    #[gpui::test]
+    fn an_installed_part_tagger_sees_the_palette_parts(cx: &mut TestAppContext) {
+        thread_local! {
+            static SEEN: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+        }
+        fn record(element: AnyElement, id: SharedString) -> AnyElement {
+            SEEN.with_borrow_mut(|seen| seen.push(id.to_string()));
+            element
+        }
+        cx.update(|cx| crate::set_part_tagger(cx, record));
+        let scenes = Command::submenu("scenes", "Open Scene", || {
+            vec![Command::new("sunset-exterior", "Sunset Exterior", || {})]
+        })
+        .searchable_children();
+        let _cx = open(
+            cx,
+            CommandPaletteTheme::default(),
+            vec![Command::new("sunset", "Sunset", || {}), scenes],
+            "sunset",
+        );
+        let seen = SEEN.with_borrow(|seen| seen.clone());
+        for id in [
+            "command-palette",
+            "command-palette.input",
+            "command-palette.row[0]",
+            "command-palette.row[1]",
+            "command-palette.group[0]",
+        ] {
+            assert!(seen.iter().any(|s| s == id), "{id} missing from {seen:?}");
+        }
     }
 }

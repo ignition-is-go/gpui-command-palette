@@ -1,5 +1,6 @@
 //! A reusable command palette for the same GPUI view on native and WebAssembly.
 mod command;
+mod part_tag;
 mod registry;
 mod search;
 mod shortcut;
@@ -7,6 +8,7 @@ mod state;
 mod theme;
 mod widget;
 pub use command::*;
+pub use part_tag::{set_part_tagger, PartTagger};
 pub use registry::*;
 pub use search::*;
 pub use shortcut::*;
