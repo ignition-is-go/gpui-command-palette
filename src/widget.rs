@@ -292,6 +292,10 @@ impl<M: Clone + 'static> Render for CommandPaletteState<M> {
                     selected_child += 1;
                 }
                 let selector = format!("command-palette-group:{label}");
+                // Leptos adds letter-spacing 0.02em and sticks headings to the top
+                // of the list. GPUI has no letter-spacing style and the list is a
+                // plain scroll container with no sticky support, so neither is
+                // reproduced here.
                 let header = div()
                     .debug_selector(move || selector)
                     .pt(px(6.))
