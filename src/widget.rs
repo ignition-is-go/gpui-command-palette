@@ -3,11 +3,11 @@ use crate::{
     CommandRegistry, PaletteLength, PaletteState,
 };
 use gpui::{
-    actions, div, fill, point, prelude::*, px, relative, size, App, Bounds, Context, Element,
-    ElementId, ElementInputHandler, Entity, EntityInputHandler, EventEmitter, FocusHandle,
+    actions, div, fill, point, prelude::*, px, relative, size, AnyElement, App, Bounds, Context,
+    Element, ElementId, ElementInputHandler, Entity, EntityInputHandler, EventEmitter, FocusHandle,
     Focusable, GlobalElementId, InspectorElementId, InteractiveElement, KeyDownEvent, LayoutId,
-    PaintQuad, Pixels, Render, ScrollHandle, ShapedLine, SharedString, Style, TextAlign, TextRun,
-    UTF16Selection, UnderlineStyle, Window,
+    ListAlignment, ListSizingBehavior, ListState, PaintQuad, Pixels, Render, ShapedLine,
+    SharedString, Style, TextAlign, TextRun, UTF16Selection, UnderlineStyle, Window,
 };
 use std::{ops::Range, sync::Arc};
 actions!(
@@ -41,7 +41,10 @@ pub struct CommandPaletteState<M: 'static = ()> {
     marked_range: Option<Range<usize>>,
     last_layout: Option<ShapedLine>,
     last_input_bounds: Option<Bounds<Pixels>>,
-    results_scroll: ScrollHandle,
+    results: ListState,
+    rows: Vec<Row<M>>,
+    revealed: Option<usize>,
+    result_count: usize,
     _keystroke_subscription: gpui::Subscription,
 }
 
@@ -70,7 +73,10 @@ impl<M: Clone + 'static> CommandPaletteState<M> {
             marked_range: None,
             last_layout: None,
             last_input_bounds: None,
-            results_scroll: ScrollHandle::new(),
+            results: ListState::new(0, ListAlignment::Top, px(300.)),
+            rows: Vec::new(),
+            revealed: None,
+            result_count: 0,
             _keystroke_subscription: subscription,
         }
     }
@@ -258,136 +264,68 @@ impl<M: Clone + 'static> Render for CommandPaletteState<M> {
         let backdrop_theme = resolved_theme.backdrop;
         let commands = self.registry.commands();
         let results = self.state.results(&commands);
+        self.result_count = results.len();
         self.state.clamp_selection(results.len());
         let selected = self.state.selected_index();
         let has_results = !results.is_empty();
-        let mut list = div()
+        // Consecutive results promoted from one submenu share a heading, which
+        // is a list row of its own; `selected_row` counts it.
+        let mut rows = Vec::with_capacity(results.len());
+        let mut heading: Option<String> = None;
+        let mut headings: Vec<(usize, SharedString)> = Vec::new();
+        let mut selected_row = selected;
+        for (index, result) in results.into_iter().enumerate() {
+            if result.parent.is_some() && result.parent != heading {
+                let label = SharedString::from(result.parent.clone().unwrap_or_default());
+                if index <= selected {
+                    selected_row += 1;
+                }
+                headings.push((rows.len(), label.clone()));
+                rows.push(Row::Heading {
+                    label,
+                    group: headings.len() - 1,
+                });
+            }
+            heading = result.parent;
+            rows.push(Row::Result {
+                index,
+                entry: result.entry,
+            });
+        }
+        if !rows_equal(&self.rows, &rows) {
+            self.results.reset(rows.len());
+            self.revealed = None;
+        }
+        self.rows = rows;
+        if has_results && self.revealed != Some(selected_row) {
+            self.results.scroll_to_reveal_item(selected_row);
+            self.revealed = Some(selected_row);
+        }
+        let list = if has_results {
+            gpui::list(
+                self.results.clone(),
+                cx.processor(|this, row: usize, _, cx| this.render_row(row, cx)),
+            )
+            .with_sizing_behavior(ListSizingBehavior::Infer)
+            .into_any_element()
+        } else {
+            div()
+                .p(empty_theme.padding)
+                .text_align(empty_theme.text_align)
+                .text_size(empty_theme.font_size)
+                .text_color(empty_theme.color.opacity(empty_theme.opacity))
+                .child("No commands found")
+                .into_any_element()
+        };
+        let list = div()
             .id("command-palette-results")
             .role(gpui::Role::ListBox)
             .aria_label("Commands")
+            .flex()
+            .flex_col()
             .flex_1()
-            .overflow_y_scroll()
-            .track_scroll(&self.results_scroll);
-        if results.is_empty() {
-            list = list.child(
-                div()
-                    .p(empty_theme.padding)
-                    .text_align(empty_theme.text_align)
-                    .text_size(empty_theme.font_size)
-                    .text_color(empty_theme.color.opacity(empty_theme.opacity))
-                    .child("No commands found"),
-            );
-        }
-        // Consecutive results promoted from one submenu share a heading, which
-        // is a list child of its own; `selected_child` counts it.
-        let mut heading: Option<String> = None;
-        let mut groups = 0;
-        let mut selected_child = selected;
-        for (index, result) in results.into_iter().enumerate() {
-            if result.parent.is_some() && result.parent != heading {
-                let label = result.parent.clone().unwrap_or_default();
-                let group = groups;
-                groups += 1;
-                if index <= selected {
-                    selected_child += 1;
-                }
-                let selector = format!("command-palette-group:{label}");
-                // Leptos adds letter-spacing 0.02em and sticks headings to the top
-                // of the list. GPUI has no letter-spacing style and the list is a
-                // plain scroll container with no sticky support, so neither is
-                // reproduced here.
-                let header = div()
-                    .debug_selector(move || selector)
-                    .pt(px(6.))
-                    .pb(px(4.))
-                    .px(px(12.))
-                    .bg(theme.background)
-                    .text_color(item_theme.shortcut_color)
-                    .text_size(px(11.))
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .child(label);
-                list = list.child(crate::part_tag::tag_part(cx, header, || {
-                    format!("command-palette.group[{group}]").into()
-                }));
-            }
-            heading = result.parent;
-            let command = result.entry;
-            let command_id = command.id.clone();
-            let description = command.description.clone();
-            let shortcut = command.shortcut.as_ref().map(ToString::to_string);
-            let branch = command.is_branch();
-            let row_selector = format!("command-palette-row:{command_id}");
-            let row = div()
-                .id(SharedString::from(row_selector.clone()))
-                .debug_selector(move || row_selector)
-                .role(gpui::Role::ListBoxOption)
-                .aria_selected(index == selected)
-                .flex()
-                .justify_between()
-                .items_center()
-                .px(item_theme.padding_x)
-                .py(item_theme.padding_y)
-                .rounded(item_theme.border_radius)
-                .cursor_pointer()
-                .when(index == selected, |row| {
-                    row.bg(item_theme.selected_background)
-                        .text_color(item_theme.selected_color)
-                })
-                .on_mouse_move(cx.listener(move |this, _, _, cx| {
-                    let count = this.state.results(&this.registry.commands()).len();
-                    this.state.select(index, count);
-                    cx.notify()
-                }))
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    let commands = this.registry.commands();
-                    if let Some(command) = this
-                        .state
-                        .results(&commands)
-                        .get(index)
-                        .map(|r| r.entry.clone())
-                    {
-                        if !this.state.enter(&command) {
-                            this.close(window, cx);
-                            this.defer_execute(command, window, cx)
-                        } else {
-                            this.reset_input_selection();
-                            cx.notify()
-                        }
-                    }
-                    cx.stop_propagation()
-                }))
-                .child(div().child(command.name).when_some(description, |x, d| {
-                    x.child(
-                        div()
-                            .mt(item_theme.description_margin_top)
-                            .text_size(item_theme.description_font_size)
-                            .text_color(item_theme.description_color)
-                            .child(d),
-                    )
-                }))
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .text_size(item_theme.shortcut_font_size)
-                        .text_color(
-                            item_theme
-                                .shortcut_color
-                                .opacity(item_theme.shortcut_opacity),
-                        )
-                        .when_some(shortcut, |x, s| x.child(s))
-                        .when(branch, |x| {
-                            x.ml(item_theme.shortcut_margin_left)
-                                .child(div().text_size(px(16.)).child("›"))
-                        }),
-                );
-            list = list.child(crate::part_tag::tag_part(cx, row, || {
-                format!("command-palette.row[{index}]").into()
-            }))
-        }
-        if has_results {
-            self.results_scroll.scroll_to_item(selected_child);
-        }
+            .min_h_0()
+            .child(list);
         let navigation = self.state.navigation().to_vec();
         let mut breadcrumbs = div()
             .flex()
@@ -460,8 +398,7 @@ impl<M: Clone + 'static> Render for CommandPaletteState<M> {
                 }
             }))
             .on_action(cx.listener(|this, _: &SelectNextCommand, _, cx| {
-                let n = this.state.results(&this.registry.commands()).len();
-                this.state.select_next(n);
+                this.state.select_next(this.result_count);
                 cx.notify()
             }))
             .on_action(cx.listener(|this, _: &SelectPreviousCommand, _, cx| {
@@ -522,7 +459,24 @@ impl<M: Clone + 'static> Render for CommandPaletteState<M> {
                     }),
                 || "command-palette.input".into(),
             ))
-            .child(list)
+            .child(
+                div()
+                    .relative()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .child(list)
+                    .when(!headings.is_empty(), |x| {
+                        x.child(sticky_heading(
+                            self.results.clone(),
+                            headings,
+                            theme.background,
+                            item_theme.shortcut_color,
+                        ))
+                    }),
+            )
             .on_click(|_, _, cx| cx.stop_propagation());
         if let CommandPalettePosition::Custom {
             top,
@@ -591,6 +545,196 @@ impl<M: Clone + 'static> Render for CommandPaletteState<M> {
             .child(panel);
         backdrop
     }
+}
+
+impl<M: Clone + 'static> CommandPaletteState<M> {
+    fn render_row(&mut self, row: usize, cx: &mut Context<Self>) -> AnyElement {
+        let resolved_theme = Arc::clone(cx.command_palette_theme());
+        let item_theme = resolved_theme.item;
+        match &self.rows[row] {
+            Row::Heading { label, group } => {
+                let selector = format!("command-palette-group:{label}");
+                let header = group_heading(
+                    label.clone(),
+                    resolved_theme.palette.background,
+                    item_theme.shortcut_color,
+                )
+                .debug_selector(move || selector);
+                let group = *group;
+                crate::part_tag::tag_part(cx, header, || {
+                    format!("command-palette.group[{group}]").into()
+                })
+            }
+            Row::Result { index, entry } => {
+                let index = *index;
+                let selected = self.state.selected_index();
+                let command = entry.clone();
+                let command_id = command.id.clone();
+                let description = command.description.clone();
+                let shortcut = command.shortcut.as_ref().map(ToString::to_string);
+                let branch = command.is_branch();
+                let row_selector = format!("command-palette-row:{command_id}");
+                let element = div()
+                    .id(SharedString::from(row_selector.clone()))
+                    .debug_selector(move || row_selector)
+                    .role(gpui::Role::ListBoxOption)
+                    .aria_selected(index == selected)
+                    .flex()
+                    .justify_between()
+                    .items_center()
+                    .px(item_theme.padding_x)
+                    .py(item_theme.padding_y)
+                    .rounded(item_theme.border_radius)
+                    .cursor_pointer()
+                    .when(index == selected, |row| {
+                        row.bg(item_theme.selected_background)
+                            .text_color(item_theme.selected_color)
+                    })
+                    .on_mouse_move(cx.listener(move |this, _, _, cx| {
+                        if this.state.selected_index() != index {
+                            this.state.select(index, index + 1);
+                            cx.notify()
+                        }
+                    }))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        let commands = this.registry.commands();
+                        if let Some(command) = this
+                            .state
+                            .results(&commands)
+                            .get(index)
+                            .map(|r| r.entry.clone())
+                        {
+                            if !this.state.enter(&command) {
+                                this.close(window, cx);
+                                this.defer_execute(command, window, cx)
+                            } else {
+                                this.reset_input_selection();
+                                cx.notify()
+                            }
+                        }
+                        cx.stop_propagation()
+                    }))
+                    .child(div().child(command.name).when_some(description, |x, d| {
+                        x.child(
+                            div()
+                                .mt(item_theme.description_margin_top)
+                                .text_size(item_theme.description_font_size)
+                                .text_color(item_theme.description_color)
+                                .child(d),
+                        )
+                    }))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .text_size(item_theme.shortcut_font_size)
+                            .text_color(
+                                item_theme
+                                    .shortcut_color
+                                    .opacity(item_theme.shortcut_opacity),
+                            )
+                            .when_some(shortcut, |x, s| x.child(s))
+                            .when(branch, |x| {
+                                x.ml(item_theme.shortcut_margin_left)
+                                    .child(div().text_size(px(16.)).child("›"))
+                            }),
+                    );
+                crate::part_tag::tag_part(cx, element, || {
+                    format!("command-palette.row[{index}]").into()
+                })
+            }
+        }
+    }
+}
+
+enum Row<M: 'static> {
+    Heading { label: SharedString, group: usize },
+    Result { index: usize, entry: Command<M> },
+}
+
+fn rows_equal<M>(a: &[Row<M>], b: &[Row<M>]) -> bool {
+    a.len() == b.len()
+        && a.iter().zip(b).all(|pair| match pair {
+            (Row::Heading { label: a, .. }, Row::Heading { label: b, .. }) => a == b,
+            (Row::Result { entry: a, .. }, Row::Result { entry: b, .. }) => {
+                a.id == b.id
+                    && a.name == b.name
+                    && a.description == b.description
+                    && a.shortcut == b.shortcut
+                    && a.is_branch() == b.is_branch()
+            }
+            _ => false,
+        })
+}
+
+/// A group heading row. Leptos also adds 0.02em letter-spacing, which GPUI
+/// text styles cannot express.
+fn group_heading(
+    label: impl Into<SharedString>,
+    background: gpui::Hsla,
+    color: gpui::Hsla,
+) -> gpui::Div {
+    div()
+        .pt(px(6.))
+        .pb(px(4.))
+        .px(px(12.))
+        .bg(background)
+        .text_color(color)
+        .text_size(px(11.))
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .child(label.into())
+}
+
+/// The group heading pinned to the top of the results viewport, pushed out by
+/// the next heading as it arrives. GPUI has no `position: sticky`, so this
+/// paints over the list. It reads the list's scroll position and row bounds in
+/// prepaint, after the list has laid out in the same frame, so it never lags a
+/// scroll.
+fn sticky_heading(
+    results: ListState,
+    headings: Vec<(usize, SharedString)>,
+    background: gpui::Hsla,
+    color: gpui::Hsla,
+) -> impl IntoElement {
+    gpui::canvas(
+        move |bounds, window, cx| {
+            let top = results.logical_scroll_top();
+            let stuck = headings.iter().rev().find(|(ix, _)| {
+                *ix < top.item_ix || (*ix == top.item_ix && top.offset_in_item > px(0.))
+            })?;
+            let next = headings.iter().find(|(ix, _)| *ix > top.item_ix);
+            let push = next
+                .and_then(|(ix, _)| results.bounds_for_item(*ix))
+                .map_or(px(0.), |next| {
+                    (next.top() - bounds.top() - next.size.height).min(px(0.))
+                });
+            let mut element = group_heading(stuck.1.clone(), background, color)
+                .debug_selector(|| "command-palette-sticky-heading".into())
+                .w(bounds.size.width)
+                .into_any_element();
+            element.prepaint_as_root(
+                point(bounds.origin.x, bounds.origin.y + push),
+                size(
+                    gpui::AvailableSpace::Definite(bounds.size.width),
+                    gpui::AvailableSpace::MinContent,
+                ),
+                window,
+                cx,
+            );
+            Some(element)
+        },
+        |bounds, element, window, cx| {
+            if let Some(mut element) = element {
+                window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
+                    element.paint(window, cx)
+                });
+            }
+        },
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full()
 }
 
 fn utf16_to_utf8_offset(text: &str, offset: usize) -> usize {
@@ -1029,8 +1173,12 @@ mod input_tests {
         cx.refresh().unwrap();
 
         palette.read_with(cx, |palette, _| {
-            assert!(palette.results_scroll.offset().y < px(0.));
-            assert_eq!(palette.results_scroll.bottom_item(), 19);
+            let row = palette
+                .results
+                .bounds_for_item(19)
+                .expect("selected row is laid out");
+            assert!(row.bottom() <= palette.results.viewport_bounds().bottom());
+            assert!(palette.results.logical_scroll_top().item_ix > 0);
         });
 
         palette.update(cx, |palette, cx| {
@@ -1039,7 +1187,7 @@ mod input_tests {
         });
         cx.refresh().unwrap();
         palette.read_with(cx, |palette, _| {
-            assert_eq!(palette.results_scroll.top_item(), 0);
+            assert_eq!(palette.results.logical_scroll_top().item_ix, 0);
         });
 
         drop(registrations);
@@ -1052,7 +1200,7 @@ mod layout_tests {
         set_command_palette_theme, Command, CommandPalettePanelStyle, CommandPaletteState,
         CommandPaletteTheme, CommandRegistry,
     };
-    use gpui::{px, size, AnyElement, SharedString, TestAppContext, VisualTestContext};
+    use gpui::{px, size, AnyElement, Pixels, SharedString, TestAppContext, VisualTestContext};
     use std::cell::RefCell;
 
     /// Opens a palette in a 1000x700 window holding `commands`, filtered by `query`.
@@ -1151,6 +1299,81 @@ mod layout_tests {
         assert_eq!(heading.bottom(), first.top());
         assert_eq!(first.bottom(), second.top());
         assert!(cx.debug_bounds("command-palette-group:Sunset").is_none());
+    }
+
+    #[gpui::test]
+    fn only_rows_near_the_viewport_are_laid_out(cx: &mut TestAppContext) {
+        let commands = (0..2000)
+            .map(|i| Command::new(format!("c{i}"), format!("Command {i}"), || {}))
+            .collect();
+        let cx = open(cx, CommandPaletteTheme::default(), commands, "command");
+        assert!(cx.debug_bounds("command-palette-row:c0").is_some());
+        assert!(cx.debug_bounds("command-palette-row:c1999").is_none());
+    }
+
+    #[gpui::test]
+    fn the_current_group_heading_sticks_to_the_top_and_is_pushed_out(cx: &mut TestAppContext) {
+        let group = |id: &'static str, name: &'static str| {
+            Command::submenu(id, name, move || {
+                (0..30)
+                    .map(|i| Command::new(format!("{id}-{i}"), format!("Sunset {i}"), || {}))
+                    .collect()
+            })
+            .searchable_children()
+        };
+        cx.update(|cx| set_command_palette_theme(cx, CommandPaletteTheme::default()));
+        let (palette, cx) =
+            cx.add_window_view(|_, cx| CommandPaletteState::new(CommandRegistry::new(), cx));
+        cx.simulate_resize(size(px(1000.), px(700.)));
+        palette.read_with(cx, |palette, _| {
+            palette.registry().register(group("a", "Group A")).forget();
+            palette.registry().register(group("b", "Group B")).forget();
+        });
+        cx.update(|window, cx| {
+            palette.update(cx, |palette, cx| {
+                palette.open(window, cx);
+                palette.set_query("sunset", cx);
+            })
+        });
+        cx.run_until_parked();
+        let results = palette.read_with(cx, |palette, _| palette.results.clone());
+        let viewport = results.viewport_bounds();
+        let scroll_to = |cx: &mut VisualTestContext, item_ix: usize, offset_in_item: Pixels| {
+            results.scroll_to(gpui::ListOffset {
+                item_ix,
+                offset_in_item,
+            });
+            cx.update(|_, cx| palette.update(cx, |_, cx| cx.notify()));
+            cx.run_until_parked();
+        };
+
+        assert!(
+            cx.debug_bounds("command-palette-sticky-heading").is_none(),
+            "the first heading is still in view"
+        );
+
+        scroll_to(cx, 5, px(0.));
+        let sticky = cx
+            .debug_bounds("command-palette-sticky-heading")
+            .expect("sticky heading once the first heading scrolls away");
+        assert_eq!(sticky.top(), viewport.top());
+        let height = sticky.size.height;
+
+        scroll_to(cx, 30, px(0.));
+        let last_row = results.bounds_for_item(30).expect("last row of group A");
+        scroll_to(cx, 30, last_row.size.height - height / 2.);
+        let pushed = cx.debug_bounds("command-palette-sticky-heading").unwrap();
+        let expected = viewport.top() - height / 2.;
+        assert!(
+            (pushed.top() - expected).abs() < px(0.5),
+            "{:?} vs {:?}",
+            pushed.top(),
+            expected
+        );
+
+        scroll_to(cx, 31, px(1.));
+        let second = cx.debug_bounds("command-palette-sticky-heading").unwrap();
+        assert_eq!(second.top(), viewport.top());
     }
 
     #[gpui::test]

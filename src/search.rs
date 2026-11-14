@@ -53,15 +53,28 @@ pub fn search_commands<M: Clone + 'static>(
 }
 
 fn matches_query<M>(command: &Command<M>, query: &str) -> bool {
-    command.name.to_lowercase().contains(query)
+    contains_lowercase(&command.name, query)
         || command
             .description
             .as_ref()
-            .is_some_and(|v| v.to_lowercase().contains(query))
+            .is_some_and(|v| contains_lowercase(v, query))
         || command
             .group
             .as_ref()
-            .is_some_and(|v| v.to_lowercase().contains(query))
+            .is_some_and(|v| contains_lowercase(v, query))
+}
+
+/// `haystack.to_lowercase().contains(query)` for an already-lowercased
+/// `query`, without allocating when both sides are ASCII.
+fn contains_lowercase(haystack: &str, query: &str) -> bool {
+    if haystack.is_ascii() && query.is_ascii() {
+        let (haystack, query) = (haystack.as_bytes(), query.as_bytes());
+        return query.is_empty()
+            || haystack
+                .windows(query.len())
+                .any(|window| window.eq_ignore_ascii_case(query));
+    }
+    haystack.to_lowercase().contains(query)
 }
 
 #[cfg(test)]
@@ -90,6 +103,24 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["z-id-match", "a", "of"]
         );
+    }
+    #[test]
+    fn ascii_fast_path_agrees_with_lowercasing() {
+        for (haystack, query) in [
+            ("Open File", "n f"),
+            ("Open File", "file"),
+            ("Open File", "files"),
+            ("", "a"),
+            ("Straße", "straße"),
+            ("ÉCLAIR", "éclair"),
+            ("Open", "é"),
+        ] {
+            assert_eq!(
+                contains_lowercase(haystack, &query.to_lowercase()),
+                haystack.to_lowercase().contains(&query.to_lowercase()),
+                "{haystack:?} / {query:?}"
+            );
+        }
     }
     #[test]
     fn promotions_context_and_first_id_wins() {
