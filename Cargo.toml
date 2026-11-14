@@ -25,3 +25,5 @@ gpui = { package = "gpui-unofficial", version = "=1.16.1", features = ["test-sup
 [[example]]
 name = "demo"
 path = "examples/demo.rs"
+
+[workspace]

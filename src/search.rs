@@ -8,6 +8,9 @@ pub struct SearchResult<M: 'static = ()> {
     pub entry: Command<M>,
     pub score: u32,
     pub catalog_index: usize,
+    /// The submenu a searchable child was promoted from, shown as the heading
+    /// of its result group.
+    pub parent: Option<String>,
 }
 
 /// Reference-compatible case-insensitive substring filtering.
@@ -23,16 +26,13 @@ pub fn search_commands<M: Clone + 'static>(
     let mut candidates = Vec::new();
     for command in commands {
         if query.is_empty() || matches_query(command, &query) {
-            candidates.push(command.clone());
+            candidates.push((command.clone(), None));
         }
         if !query.is_empty() && command.searches_children() {
             if let Some(children) = command.resolve_children() {
-                for mut child in children {
+                for child in children {
                     if matches_query(&child, &query) {
-                        if child.description.is_none() {
-                            child.description = Some(command.name.clone());
-                        }
-                        candidates.push(child);
+                        candidates.push((child, Some(command.name.clone())));
                     }
                 }
             }
@@ -42,25 +42,39 @@ pub fn search_commands<M: Clone + 'static>(
     candidates
         .into_iter()
         .enumerate()
-        .filter(|(_, c)| seen.insert(c.id.clone()))
-        .map(|(catalog_index, entry)| SearchResult {
+        .filter(|(_, (c, _))| seen.insert(c.id.clone()))
+        .map(|(catalog_index, (entry, parent))| SearchResult {
             entry,
             score: 0,
             catalog_index,
+            parent,
         })
         .collect()
 }
 
 fn matches_query<M>(command: &Command<M>, query: &str) -> bool {
-    command.name.to_lowercase().contains(query)
+    contains_lowercase(&command.name, query)
         || command
             .description
             .as_ref()
-            .is_some_and(|v| v.to_lowercase().contains(query))
+            .is_some_and(|v| contains_lowercase(v, query))
         || command
             .group
             .as_ref()
-            .is_some_and(|v| v.to_lowercase().contains(query))
+            .is_some_and(|v| contains_lowercase(v, query))
+}
+
+/// `haystack.to_lowercase().contains(query)` for an already-lowercased
+/// `query`, without allocating when both sides are ASCII.
+fn contains_lowercase(haystack: &str, query: &str) -> bool {
+    if haystack.is_ascii() && query.is_ascii() {
+        let (haystack, query) = (haystack.as_bytes(), query.as_bytes());
+        return query.is_empty()
+            || haystack
+                .windows(query.len())
+                .any(|window| window.eq_ignore_ascii_case(query));
+    }
+    haystack.to_lowercase().contains(query)
 }
 
 #[cfg(test)]
@@ -91,6 +105,24 @@ mod tests {
         );
     }
     #[test]
+    fn ascii_fast_path_agrees_with_lowercasing() {
+        for (haystack, query) in [
+            ("Open File", "n f"),
+            ("Open File", "file"),
+            ("Open File", "files"),
+            ("", "a"),
+            ("Straße", "straße"),
+            ("ÉCLAIR", "éclair"),
+            ("Open", "é"),
+        ] {
+            assert_eq!(
+                contains_lowercase(haystack, &query.to_lowercase()),
+                haystack.to_lowercase().contains(&query.to_lowercase()),
+                "{haystack:?} / {query:?}"
+            );
+        }
+    }
+    #[test]
     fn promotions_context_and_first_id_wins() {
         let direct = Command::new("same", "Direct Sunset", || {});
         let branch = Command::submenu("scenes", "Open Scene", || {
@@ -106,5 +138,17 @@ mod tests {
             ["same", "dawn"]
         );
         assert_eq!(out[1].entry.description.as_deref(), Some("kept"));
+        assert_eq!(out[0].parent, None);
+        assert_eq!(out[1].parent.as_deref(), Some("Open Scene"));
+    }
+    #[test]
+    fn promoted_children_keep_their_own_description() {
+        let branch = Command::submenu("scenes", "Open Scene", || {
+            vec![Command::new("sunset", "Sunset", || {})]
+        })
+        .searchable_children();
+        let out = search_commands(&[branch], "sunset");
+        assert_eq!(out[0].entry.description, None);
+        assert_eq!(out[0].parent.as_deref(), Some("Open Scene"));
     }
 }
